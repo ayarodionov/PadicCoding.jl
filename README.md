@@ -4,8 +4,12 @@
 
 A Julia package implementing the compression algorithm from
 
-> Anatoly Rodionov, Sergey Volkov, *P-adic arithmetic coding*, Spectrum
-> Systems, 2007 (`p-adic_arithm_coding.pdf` in this directory).
+> A. Rodionov and S. Volkov, "p-Adic arithmetic coding", *Contemporary
+> Mathematics*, 508, 201–213, 2010.
+>
+> A. Rodionov and S. Volkov, "p-Adic arithmetic coding", 29 pp., 2007,
+> <http://arxiv.org/abs/0704.0834v1>
+> (`p-adic_arithm_coding.pdf` in this directory).
 
 The coder is a generalization of integer arithmetic coding. A message is
 mapped to a semi interval of `[0, 1)` whose edges lie on an equidistant grid
