@@ -33,8 +33,11 @@ models it reproduces Huffman and Golomb-Rice codes exactly.
 | `src/PadicCoding.jl` | Reference implementation for any prime `P`: module `PadicCoding` |
 | `src/PadicCoding2.jl` | Optimized `P = 2` specialization: submodule `PadicCoding2` |
 | `test/runtests.jl` | Test suite (paper examples, roundtrips, cross-checks) |
-| `benchmark.jl` | Throughput benchmark of all coders |
-| `demo.jl` | Compresses a text file and prints the rate vs. entropy |
+| `demos/benchmark.jl` | Throughput benchmark of all coders |
+| `demos/demo.jl` | Compresses a text file and prints the rate vs. entropy |
+| `demos/ip_demo.jl` | IPv4 address list compression (flat vs. per-octet-position model) |
+| `demos/ipv6_demo.jl` | IPv6 address list compression (flat vs. per-byte-position model) |
+| `demos/ipv6_split_demo.jl` | IPv6 compression with a dictionary prefix model + per-field coding |
 | `p-adic_arithm_coding.pdf` | The paper |
 
 No external packages are required (only `Test`, `Random`, `Printf` from the
@@ -81,8 +84,11 @@ Run the tests, demo and benchmark from a clone with
 
 ```
 julia --project -e 'using Pkg; Pkg.test()'
-julia --project demo.jl [file]
-julia --project benchmark.jl [file]
+julia --project demos/demo.jl [file]
+julia --project demos/benchmark.jl [file]
+julia --project demos/ip_demo.jl
+julia --project demos/ipv6_demo.jl
+julia --project demos/ipv6_split_demo.jl
 ```
 
 ## API
