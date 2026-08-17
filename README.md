@@ -38,6 +38,8 @@ models it reproduces Huffman and Golomb-Rice codes exactly.
 | `demos/ip_demo.jl` | IPv4 address list compression (flat vs. per-octet-position model) |
 | `demos/ipv6_demo.jl` | IPv6 address list compression (flat vs. per-byte-position model) |
 | `demos/ipv6_split_demo.jl` | IPv6 compression with a dictionary prefix model + per-field coding |
+| `demos/cpp/padic2.hpp` | C++ port of `PadicCoding2` (bit-identical `P = 2` coder) |
+| `demos/cpp/padic2_bench.cpp` | C++ throughput benchmark, matches `demos/benchmark.jl`'s workload |
 | `p-adic_arithm_coding.pdf` | The paper |
 
 No external packages are required (only `Test`, `Random`, `Printf` from the
@@ -128,6 +130,18 @@ every coder):
 | `PadicCoding`, PR+AR, P=3, N=26 | 0.4 MB/s | 0.3 MB/s |
 | `PadicCoding`, PR+AR, P=5, N=18 | 0.6 MB/s | 0.5 MB/s |
 | `PadicCoding2`, P=2, N=40 | **23 MB/s** | **8.7 MB/s** |
+
+`demos/cpp/padic2.hpp` is a direct C++ port of `PadicCoding2` (same PR+AR
+algorithm lowered to `uint64_t` word ops, bit-identical output). Built with
+`g++ -O3`, it runs the same 10^6-symbol benchmark at roughly 25 MB/s encode /
+9 MB/s decode — modestly faster than the Julia specialization, since Julia's
+JIT already compiles this kind of tight bit-manipulation loop to comparably
+efficient native code:
+
+```
+g++ -O3 -std=c++17 demos/cpp/padic2_bench.cpp -o padic2_bench
+./padic2_bench
+```
 
 ## Implementation notes
 
