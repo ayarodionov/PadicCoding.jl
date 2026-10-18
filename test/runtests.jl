@@ -122,4 +122,30 @@ end
     @test padic_decode2(m2b, bits2) == bmsg
 end
 
+@testset "adaptive P = 2 coder (per-step models)" begin
+    rng = MersenneTwister(11)
+    m2 = PadicModel2([4, 2, 1, 1]; N = 32)
+    msg = rand(rng, 1:4, 3000)
+    # a constant model function reproduces the static coder exactly
+    @test padic_encode2((t, pre) -> m2, msg) == padic_encode2(m2, msg)
+    @test padic_decode2((t, pre) -> m2, padic_encode2(m2, msg)) == msg
+
+    # stateful adaptive counter: called once per step, in order
+    function counter()
+        counts = ones(Int, 4)
+        return (t, pre) -> begin
+            t > 1 && (counts[pre[end]] += 8)
+            PadicModel2(counts; N = 32)
+        end
+    end
+    skewed = [rand(rng) < 0.9 ? 1 : rand(rng, 2:4) for _ in 1:3000]
+    for len in (0, 1, 10, 3000)
+        sub = skewed[1:len]
+        bits = padic_encode2(counter(), sub)
+        @test padic_decode2(counter(), bits) == sub
+    end
+    @test length(padic_encode2(counter(), skewed)) <
+          length(padic_encode2(PadicModel2(ones(Int, 4); N = 32), skewed))
+end
+
 println("all tests passed")
