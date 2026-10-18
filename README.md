@@ -38,6 +38,7 @@ models it reproduces Huffman and Golomb-Rice codes exactly.
 | `demos/ip_demo.jl` | IPv4 address list compression (flat vs. per-octet-position model) |
 | `demos/ipv6_demo.jl` | IPv6 address list compression (flat vs. per-byte-position model) |
 | `demos/ipv6_split_demo.jl` | IPv6 compression with a dictionary prefix model + per-field coding |
+| `demos/kalman_demo.jl` | Numeric signal compression with Kalman-filter predictive models (adaptive coder) |
 | `demos/cpp/padic2.hpp` | C++ port of `PadicCoding2` (bit-identical `P = 2` coder) |
 | `demos/cpp/padic2_bench.cpp` | C++ throughput benchmark, matches `demos/benchmark.jl`'s workload |
 | `p-adic_arithm_coding.pdf` | The paper |
@@ -91,6 +92,7 @@ julia --project demos/benchmark.jl [file]
 julia --project demos/ip_demo.jl
 julia --project demos/ipv6_demo.jl
 julia --project demos/ipv6_split_demo.jl
+julia --project demos/kalman_demo.jl
 ```
 
 ## API
@@ -112,11 +114,36 @@ julia --project demos/ipv6_split_demo.jl
 
 - `PadicModel2(freqs; N)` with `2 ≤ N ≤ 62`.
 - `padic_encode2(m, msg) -> BitVector`, `padic_decode2(m, bits)`.
+- `padic_encode2(model_at, msg)`, `padic_decode2(model_at, bits)` — adaptive
+  coding: symbol `t` uses the model `model_at(t, prefix)`, where `prefix` holds
+  the symbols before `t` (the EOM uses `t = length(msg) + 1`). `model_at` is
+  called once per step, in order, so it may be a stateful closure (an adaptive
+  counter, a Kalman filter, a neural predictor, ...); the decoder must use a
+  fresh, identical copy of it. All models must share `N`.
 
 The specialization lowers the p-adic machinery to word operations on
 `UInt64`: `^` is a hardware `bitreverse`, `ord_2`/`com` is `trailing_zeros`
 of an XOR, `cut`/`res`/`lift` are shifts and masks, the ring mod `2^N` is
 plain masking, and the AR stable point is hardwired to 1.
+
+## Kalman-filter demo
+
+`demos/kalman_demo.jl` codes a synthetic 1-D GPS-like track (20 000 24-bit
+samples switching between parked / cruise / maneuver / noisy "urban canyon"
+regimes, with rare multipath outliers). Each sample is a residual bin around a
+predicted centre (or an escape + raw value), with the per-step distribution
+from the adaptive coder:
+
+| Model | bits/sample | vs raw |
+|---|---|---|
+| static delta histogram (two-pass, table not counted) | 8.07 | 2.97x |
+| adaptive delta counter | 7.41 | 3.24x |
+| best single Kalman filter (hindsight-tuned) | 7.29 | 3.29x |
+| mixture of 6 Kalman filters, likelihood-weighted with forgetting | **5.72** | **4.19x** |
+
+The Kalman predictive Gaussian `N(mu, S)` supplies both the centre and a
+calibrated width; mixing filters with different noise levels lets the model
+follow regime changes, which no single fixed filter can.
 
 ## Performance
 

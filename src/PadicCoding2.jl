@@ -182,12 +182,34 @@ end
 Optimized P = 2 encoder; bit-identical to `PadicCoding.padic_encode` with the
 same frequencies and N.
 """
-function padic_encode2(m::PadicModel2, msg::AbstractVector{<:Integer})
+padic_encode2(m::PadicModel2, msg::AbstractVector{<:Integer}) =
+    encode2(Returns(m), m, msg)
+
+"""
+    padic_encode2(model_at, msg) -> BitVector
+
+Adaptive encoder: symbol `t` of `msg` is coded with the model
+`model_at(t, view(msg, 1:t-1))`, and the closing EOM with
+`model_at(length(msg) + 1, msg)`. `model_at` is called exactly once per `t`,
+in increasing order, so it may keep internal state (e.g. a filter updated
+with `prefix[end]`). All models must share the same `N`. Decode with
+[`padic_decode2`](@ref)`(model_at′, bits)` where `model_at′` is a fresh copy
+of the same deterministic model.
+"""
+function padic_encode2(model_at, msg::AbstractVector{<:Integer})
+    m1 = model_at(1, view(msg, 1:0))
+    return encode2((t, pre) -> t == 1 ? m1 : model_at(t, pre), m1, msg)
+end
+
+function encode2(model_at, m1::PadicModel2, msg::AbstractVector{<:Integer})
     out = BitVector()
     l = r = UInt64(0)
     spn = 0
-    for a in msg
-        l, r = mcode(m, Int(a), l, r)
+    m = m1
+    for t in eachindex(msg)
+        m = model_at(t, view(msg, 1:t-1))
+        m.N == m1.N || throw(ArgumentError("all models must share the same N"))
+        l, r = mcode(m, Int(msg[t]), l, r)
         l, r, spn = flush_sp!(out, m, l, r, spn)
         if spn == 0                                    # PR rescaling
             lh = hat(m, l)
@@ -207,6 +229,7 @@ function padic_encode2(m::PadicModel2, msg::AbstractVector{<:Integer})
             r = hat(m, cut1(rh))
         end
     end
+    isempty(msg) || (m = model_at(length(msg) + 1, msg))
     l, r = mcode(m, eom2(m), l, r)
     l, r, spn = flush_sp!(out, m, l, r, spn)
     if spn == 0
@@ -223,13 +246,29 @@ end
 
 Decoder matching [`padic_encode2`](@ref); accepts any 0/1 vector.
 """
-function padic_decode2(m::PadicModel2, bits::AbstractVector)
+padic_decode2(m::PadicModel2, bits::AbstractVector) =
+    decode2(Returns(m), m, bits)
+
+"""
+    padic_decode2(model_at, bits) -> Vector{Int}
+
+Decoder for the adaptive [`padic_encode2`](@ref)`(model_at, msg)`:
+`model_at(t, decoded_so_far)` is called once per `t`, in increasing order.
+"""
+function padic_decode2(model_at, bits::AbstractVector)
+    m1 = model_at(1, Int[])
+    return decode2((t, pre) -> t == 1 ? m1 : model_at(t, pre), m1, bits)
+end
+
+function decode2(model_at, m1::PadicModel2, bits::AbstractVector)
     io = BitReader2(bits, 1)
     out = Int[]
     l = r = UInt64(0)
     spn = 0
-    g = getpath!(io, m.N)
+    g = getpath!(io, m1.N)
     while true
+        m = model_at(length(out) + 1, out)
+        m.N == m1.N || throw(ArgumentError("all models must share the same N"))
         l, r, a = mdecode(m, g, l, r)
         a == eom2(m) && break
         push!(out, a)
