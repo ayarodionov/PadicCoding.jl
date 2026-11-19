@@ -1,0 +1,722 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Ternary p-adic Coder</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: one column (shared by the P = 2 and P = 3 pages); controls → stage (coding tree over the [0,1) grid) → narration + state readouts side by side → model table. */
+:root {
+  --bg: #f2f5f7;
+  --surface: #ffffff;
+  --ink: #15202b;
+  --muted: #5a6876;
+  --line: #d3dbe2;
+  --tree: #c3ced8;
+  --accent: #c98400;      /* settled bits / common prefix */
+  --accent-soft: #fbefd6;
+  --lpath: #2457d6;
+  --rpath: #c8324f;
+  --s0: #2a9d8f; --s1: #8a63d2; --s2: #e07a3f; --s3: #4f9d4a; --s4: #8a939c;
+  --band: rgba(201,132,0,.14);
+  --f-display: "Space Grotesk", "Segoe UI", system-ui, sans-serif;
+  --f-body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0e141a; --surface: #161f28; --ink: #e5ebf0; --muted: #93a1ae; --line: #2a3642; --tree: #34424f;
+  --accent: #f0b43c; --accent-soft: #3a2f17; --lpath: #6e9bff; --rpath: #ff6f8a;
+  --s0: #3cc0b0; --s1: #a988f0; --s2: #f29a62; --s3: #74c26c; --s4: #7d8893;
+  --band: rgba(240,180,60,.16); color-scheme: dark; } }
+:root[data-theme="dark"] {
+  --bg: #0e141a; --surface: #161f28; --ink: #e5ebf0; --muted: #93a1ae; --line: #2a3642; --tree: #34424f;
+  --accent: #f0b43c; --accent-soft: #3a2f17; --lpath: #6e9bff; --rpath: #ff6f8a;
+  --s0: #3cc0b0; --s1: #a988f0; --s2: #f29a62; --s3: #74c26c; --s4: #7d8893;
+  --band: rgba(240,180,60,.16); color-scheme: dark; }
+
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font-family: var(--f-body); font-size: 15px; line-height: 1.55; }
+.wrap { max-width: 1080px; margin: 0 auto; padding-block: 28px 48px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: flex; flex-direction: column; gap: 18px; }
+h1 { font-family: var(--f-display); font-weight: 700; font-size: 30px; letter-spacing: -.01em; margin: 0; text-wrap: balance; }
+h2 { font-family: var(--f-display); font-weight: 500; font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0 0 8px; }
+.lede { margin: 6px 0 0; max-width: 72ch; color: var(--muted); }
+.lede b { color: var(--ink); font-weight: 600; }
+code, .mono { font-family: var(--f-mono); font-size: .92em; }
+
+.controls { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: end; }
+.field { display: flex; flex-direction: column; gap: 4px; }
+.field label { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+input[type=text], input[type=number], select {
+  font-family: var(--f-mono); font-size: 14px; color: var(--ink); background: var(--surface);
+  border: 1px solid var(--line); border-radius: 6px; padding: 7px 9px; }
+input[type=text] { width: 15ch; text-transform: uppercase; letter-spacing: .12em; }
+.freqs { display: flex; gap: 6px; }
+.freqs input { width: 3.6em; }
+button { font-family: var(--f-body); font-weight: 600; font-size: 14px; border-radius: 6px; padding: 7px 13px;
+  border: 1px solid var(--line); background: var(--surface); color: var(--ink); cursor: pointer; }
+button:hover { border-color: var(--muted); }
+button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button.primary { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.transport { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.transport input[type=range] { width: 180px; max-width: 40vw; accent-color: var(--accent); }
+.err { color: var(--rpath); font-size: 13px; min-height: 1em; }
+
+.stage { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 10px 6px 4px; }
+.svgbox { overflow-x: auto; }
+svg { display: block; width: 100%; min-width: 620px; height: auto; }
+.t-edge { stroke: var(--tree); stroke-width: 1; fill: none; }
+.t-lbl { fill: var(--muted); font-family: var(--f-mono); font-size: 11px; text-anchor: middle; }
+.axis { stroke: var(--line); }
+.tick { stroke: var(--muted); }
+.ticklbl { fill: var(--muted); font-family: var(--f-mono); font-size: 12px; text-anchor: middle; }
+.bar-bg { fill: var(--bg); stroke: var(--line); }
+.ival { fill: none; stroke: var(--ink); stroke-width: 2; }
+.ivalfill { fill: var(--ink); opacity: .08; }
+.slicelbl { font-family: var(--f-display); font-weight: 700; font-size: 13px; text-anchor: middle; fill: #fff; }
+.band { fill: var(--band); stroke: var(--accent); stroke-dasharray: 4 3; }
+.lp { stroke: var(--lpath); stroke-width: 2.5; fill: none; stroke-linejoin: round; }
+.rp { stroke: var(--rpath); stroke-width: 2.5; fill: none; stroke-linejoin: round; }
+.cp { stroke: var(--accent); stroke-width: 5; fill: none; stroke-linejoin: round; stroke-linecap: round; }
+.bitlbl { fill: var(--accent); font-family: var(--f-mono); font-weight: 600; font-size: 13px; text-anchor: end; }
+.endlbl { font-family: var(--f-mono); font-size: 11px; font-weight: 600; }
+.pt { fill: var(--accent); stroke: var(--surface); stroke-width: 2; }
+
+.lower { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap: 18px; }
+@media (max-width: 760px) { .lower { grid-template-columns: minmax(0, 1fr); } }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; min-width: 0; }
+.stepno { font-family: var(--f-mono); font-size: 12px; color: var(--muted); }
+.phase { display: inline-block; font-family: var(--f-mono); font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
+  padding: 2px 8px; border-radius: 99px; background: var(--accent-soft); color: var(--accent); margin-left: 8px; }
+.narr h3 { font-family: var(--f-display); font-size: 19px; font-weight: 700; margin: 6px 0 6px; text-wrap: balance; }
+.narr p { margin: 0 0 6px; max-width: 65ch; }
+.kv { display: grid; grid-template-columns: auto minmax(0,1fr); gap: 4px 12px; font-family: var(--f-mono); font-size: 13.5px; align-items: baseline; }
+.kv dt { color: var(--muted); }
+.kv dd { margin: 0; overflow-wrap: anywhere; }
+.bits .pre { background: var(--accent-soft); color: var(--accent); font-weight: 600; border-radius: 3px; }
+.cl { color: var(--lpath); } .cr { color: var(--rpath); }
+.out { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 10px; min-height: 30px; }
+.chip { font-family: var(--f-mono); font-size: 14px; font-weight: 600; width: 24px; height: 28px; display: grid; place-items: center;
+  border-radius: 4px; background: var(--bg); border: 1px solid var(--line); }
+.chip.new { background: var(--accent); color: var(--surface); border-color: var(--accent); }
+.chip.pend { border-style: dashed; border-color: var(--accent); color: var(--accent); background: transparent; }
+.chip.wide { width: auto; padding: 0 6px; font-size: 13px; }
+.chip.used { opacity: .4; }
+.chip.ghost { border-style: dashed; color: var(--muted); background: transparent; }
+.chip.ghost.new { color: var(--surface); background: var(--accent); }
+.pendnote { font-size: 13px; color: var(--muted); margin-top: 6px; min-height: 1.2em; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 7px; padding: 2px; background: var(--surface); gap: 2px; }
+.seg button { border: 0; padding: 6px 14px; background: transparent; }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
+input.code { width: 26ch; max-width: 70vw; text-transform: none; letter-spacing: .08em; }
+.gp { stroke: var(--ink); stroke-width: 3; fill: none; stroke-linejoin: round; stroke-dasharray: 6 3; }
+.gline { stroke: var(--ink); stroke-width: 2.5; }
+.gmark { fill: var(--ink); }
+.glbl { fill: var(--ink); font-family: var(--f-mono); font-weight: 600; font-size: 12px; text-anchor: middle; }
+.msg { display: flex; flex-wrap: wrap; gap: 4px; }
+.msg span { font-family: var(--f-display); font-weight: 700; font-size: 15px; width: 26px; height: 28px; display: grid; place-items: center;
+  border-radius: 4px; color: #fff; opacity: .35; }
+.msg span.cur { opacity: 1; outline: 2px solid var(--ink); outline-offset: 1px; }
+.msg span.done { opacity: .8; }
+table { border-collapse: collapse; font-size: 14px; width: 100%; }
+th, td { text-align: left; padding: 5px 10px 5px 0; border-bottom: 1px solid var(--line); font-variant-numeric: tabular-nums; }
+th { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 500; }
+.sw { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -1px; margin-right: 6px; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 13px; color: var(--muted); padding: 2px 10px 8px; }
+.legend i { display: inline-block; width: 18px; height: 0; border-top: 3px solid; vertical-align: middle; margin-right: 6px; }
+.notes p { margin: 0 0 8px; max-width: 75ch; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+body { margin: 0; }
+.capture header, .capture .controls, .capture #more { display: none; }
+.capture .wrap { padding-block: 12px; gap: 12px; }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Ternary p-adic Coder</h1>
+    <p class="lede">Animated runs of the revised p-adic arithmetic coder with <b>P = 3</b> on the grid
+      <b>G(3<sup>5</sup>)</b>: 243 cells, each a leaf of the ternary coding tree. <b>Encode</b> narrows an interval
+      <code>[l, r)</code>; when the tree paths to <code>l</code> and <code>r−1</code> share a prefix, those trits are
+      output and the interval is rescaled (PR). When the interval hugs ⅓ or ⅔, it is stretched ×3 around that point and
+      one trit is deferred (AR). <b>Decode</b> replays the same moves with a point <code>g</code> read from the code. Both traces match
+      <code>padic_encode</code> / <code>padic_decode</code> with <code>P = 3</code> digit for digit.</p>
+  </header>
+
+  <section class="controls" aria-label="Input">
+    <div class="seg" role="group" aria-label="Mode"><button id="mEnc" aria-pressed="true">Encode</button><button id="mDec" aria-pressed="false">Decode</button></div>
+    <div class="field"><label for="msgIn">Message (A–D)</label><input type="text" id="msgIn" value="ABABABABAB" maxlength="24" spellcheck="false"></div>
+    <div class="field"><label>Frequencies A B C D (EOM = 1)</label>
+      <div class="freqs"><input type="number" id="fA" min="1" max="26" value="4" aria-label="Frequency of A"><input type="number" id="fB" min="1" max="26" value="2" aria-label="Frequency of B"><input type="number" id="fC" min="1" max="26" value="1" aria-label="Frequency of C"><input type="number" id="fD" min="1" max="26" value="1" aria-label="Frequency of D"></div></div>
+    <div class="field" id="codeField" hidden><label for="codeIn">Code (trits)</label><input type="text" id="codeIn" class="code" spellcheck="false" autocomplete="off"></div>
+    <button id="fillBtn" hidden title="Replace the code with the encoding of the message">Use message code</button>
+    <button class="primary" id="encBtn">Run</button>
+    <div class="transport" aria-label="Playback">
+      <button id="resetBtn" title="Back to start">⏮</button>
+      <button id="backBtn" title="Previous step (←)">◀</button>
+      <button id="playBtn" title="Play / pause (space)" style="min-width:5.5em">▶ Play</button>
+      <button id="fwdBtn" title="Next step (→)">▶|</button>
+      <input type="range" id="scrub" min="0" max="1" value="0" aria-label="Step">
+      <select id="speed" aria-label="Speed"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="4">4×</option></select>
+    </div>
+    <div class="err" id="err"></div>
+  </section>
+
+  <section class="stage">
+    <div class="legend">
+      <span><i style="border-color:var(--lpath)"></i>path to l</span>
+      <span><i style="border-color:var(--rpath)"></i>path to r−1</span>
+      <span><i style="border-color:var(--accent)"></i>common prefix = settled trits</span>
+      <span><i style="border-color:var(--accent);border-top-style:dashed"></i>region being zoomed</span>
+      <span><i style="border-color:var(--ink);border-top-width:2px;border-top-style:dotted"></i>AR stable point</span>
+      <span id="gLegend" hidden><i style="border-color:var(--ink);border-top-width:4px"></i>decoder point g</span>
+    </div>
+    <div class="svgbox"><svg id="svg" viewBox="0 0 1000 384" role="img" aria-label="Ternary coding tree above the unit interval grid">
+      <g id="static"></g><g id="dyn"></g></svg></div>
+  </section>
+
+  <section class="lower">
+    <div class="card narr" aria-live="polite">
+      <div><span class="stepno" id="stepNo"></span><span class="phase" id="phase"></span></div>
+      <h3 id="nTitle"></h3>
+      <div id="nText"></div>
+    </div>
+    <div class="card">
+      <h2 id="msgH">Message</h2>
+      <div class="msg" id="msgView" style="margin-bottom:12px"></div>
+      <dl class="kv" id="kv"></dl>
+      <h2 style="margin-top:14px" id="outH">Output</h2>
+      <div class="out" id="out"></div>
+      <div class="pendnote" id="pendNote"></div>
+    </div>
+  </section>
+
+  <section class="lower" id="more">
+    <div class="card">
+      <h2>Model</h2>
+      <table><thead><tr><th>Symbol</th><th>Freq</th><th>p</th><th>−log₃ p</th></tr></thead><tbody id="model"></tbody></table>
+    </div>
+    <div class="card notes">
+      <h2>Reading the picture</h2>
+      <p>A grid index <code>x</code> written in 5 ternary digits, most significant first, is the path from the root to leaf <code>x</code>
+        (0 = left, 1 = middle, 2 = right). Read from the leaf upward, the same digits form the 3-adic integer <code>x^</code>; the IP transform <code>^</code> only reverses them.</p>
+      <p>The 3-adic distance <code>|l^ − (r−1)^|₃ = 3^−n</code>, where <code>n</code> is the length of the shared path. Once it drops below 1, the interval
+        lies in one subtree and its <code>n</code> path trits are final.</p>
+      <p>The decoder holds the next 5 code trits as a grid point <code>g</code>. Each rescaling shifts digits out of the top of <code>g</code> and new code trits into its bottom, so <code>g</code> stays inside the interval and picks out each symbol.</p>
+      <p>Unlike P = 2, there are two level-1 points, ⅓ and ⅔. AR rescaling remembers which one it stretched around (the stable point) and how many times.
+        The width stays above 2/P² − 1/Pᴺ, so the total frequency may be at most 2·3³ − 1 = 53.</p>
+    </div>
+  </section>
+</div>
+
+<script>
+/*TRACE*/
+function buildTrace(freqs, msg, P, N) {
+  const R = P ** N;
+  const f = [...freqs, 1];
+  const cum = [0]; for (const x of f) cum.push(cum[cum.length - 1] + x);
+  const total = cum[cum.length - 1];
+  const EOM = f.length - 1;
+  const big = r => (r === 0 ? R : r);
+  const digit = (x, i) => Math.floor(x / P ** (N - 1 - i)) % P;   // i-th path digit (0 = top)
+  const shl = (x, n) => (x * P ** n) % R;
+  const commonLen = (a, b) => { let n = 0; while (n < N && digit(a, n) === digit(b, n)) n++; return n; };
+  let l = 0, r = 0, spn = 0, sp = 0;
+  const out = [], frames = [];
+  const snap = o => frames.push(Object.assign({ l, r: big(r), spn, sp, out: out.slice(), newBits: 0 }, o));
+  const S = R / P;  // size of a level-1 cell
+  snap({ kind: 'start', t: -1 });
+
+  function flush(t) {
+    if (spn === 0) return;
+    let d0 = -1, fill;
+    if (digit(l, 0) >= sp) { d0 = sp; fill = 0; }
+    else if (digit(r, 0) < sp || r === sp * S) { d0 = sp - 1; fill = P - 1; }
+    if (d0 < 0) { snap({ kind: 'flushwait', t }); return; }
+    const k = spn, s0 = sp;
+    out.push(d0); for (let i = 0; i < k; i++) out.push(fill);
+    l = shl(l, 1); r = shl(r, 1); spn = 0; sp = 0;
+    snap({ kind: 'flush', t, d0, fill, k, s0, newBits: k + 1, zoom: { a: d0 * S, b: (d0 + 1) * S, a2: 0, b2: R } });
+  }
+  function step(s, t) {
+    const w = big(r) - l;
+    const slices = f.map((_, i) => ({ s: i, a: l + Math.floor(w * cum[i] / total), b: l + Math.floor(w * cum[i + 1] / total) }));
+    snap({ kind: 'split', t, s, slices });
+    l = slices[s].a; r = slices[s].b % R;
+    snap({ kind: 'narrow', t, s, slices });
+  }
+  for (let t = 0; t < msg.length; t++) {
+    step(msg[t], t);
+    flush(t);
+    if (spn === 0) {
+      const n = commonLen(l, (r - 1 + R) % R);
+      const pre = Math.floor(l / P ** (N - n));
+      snap({ kind: 'paths', t, n, paths: true, node: { d: n, p: pre } });
+      if (n > 0) {
+        for (let i = 0; i < n; i++) out.push(digit(l, i));
+        const zoom = { a: pre * P ** (N - n), b: (pre + 1) * P ** (N - n), a2: 0, b2: R };
+        l = shl(l, n); r = shl(r, n);
+        snap({ kind: 'pr', t, n, newBits: n, zoom });
+      }
+    }
+    while (true) {
+      const R0 = big(r);
+      const ok = digit(r, 0) - digit(l, 0) === 1 && digit(l, 1) === P - 1 && digit(r, 1) === 0;
+      if (!ok) break;
+      const k = digit(r, 0);
+      if (sp === 0) sp = k;
+      spn++;
+      const c = k * S, pl = l, pr = R0;
+      l = P * l - (P - 1) * c; r = (P * R0 - (P - 1) * c) % R;
+      snap({ kind: 'ar', t, k, pl, pr, zoom: { a: c - S / P, b: c + S / P, a2: c - S, b2: c + S } });
+    }
+  }
+  const T = msg.length;
+  step(EOM, T);
+  flush(T);
+  let point, k;
+  if (spn === 0) {
+    let lo = l, hi = big(r);
+    const u = [];
+    for (let i = 0; i < N; i++) {
+      for (let d = 0; d < P; d++) {
+        const a0 = lo + (((d - lo) % P) + P) % P;
+        if (a0 < hi) { u.push(d); lo = Math.floor(a0 / P); hi = Math.ceil((hi - d) / P); break; }
+      }
+    }
+    // u[0] = least significant index digit ... u[N-1] = most significant
+    point = 0; for (let i = 0; i < N; i++) point += u[i] * P ** i;
+    let q = 0; for (let i = 0; i < N; i++) q = q * P + u[i];
+    k = 1; while (P ** k <= q) k++;            // ndigits (ndigits(0) = 1)
+    for (let i = 0; i < k; i++) out.push(digit(point, i));
+  } else {
+    out.push(sp); k = 1; point = sp * S;
+  }
+  snap({ kind: 'final', t: T, point, k, newBits: k, pend: spn });
+  const ideal = msg.reduce((a, s) => a - Math.log(f[s] / total), 0) / Math.log(P) + Math.log(total) / Math.log(P);
+  snap({ kind: 'done', t: T + 1, point, k, ideal });
+  return { frames, bits: out, P, N, R, f, total, EOM };
+}
+
+
+function buildDecodeTrace(freqs, bits, P, N, maxSyms) {
+  const R = P ** N, S = R / P;
+  const f = [...freqs, 1];
+  const cum = [0]; for (const x of f) cum.push(cum[cum.length - 1] + x);
+  const total = cum[cum.length - 1];
+  const EOM = f.length - 1;
+  const big = r => (r === 0 ? R : r);
+  const digit = (x, i) => Math.floor(x / P ** (N - 1 - i)) % P;
+  const shl = (x, n) => (x * P ** n) % R;
+  const commonLen = (a, b) => { let n = 0; while (n < N && digit(a, n) === digit(b, n)) n++; return n; };
+  let l = 0, r = 0, spn = 0, sp = 0, g = 0, pos = 0;
+  const dec = [], frames = [];
+  const read = n => { let x = 0; for (let i = 0; i < n; i++) { x = x * P + (pos < bits.length ? bits[pos] : 0); pos++; } return x; };
+  const snap = o => frames.push(Object.assign({ l, r: big(r), g, pos, spn, sp, dec: dec.slice(), read: 0 }, o));
+  g = read(N);
+  snap({ kind: 'start', t: 0, read: N });
+  let ok = true;
+  while (true) {
+    const t = dec.length;
+    const w = big(r) - l, off = g - l;
+    const slices = f.map((_, i) => ({ s: i, a: l + Math.floor(w * cum[i] / total), b: l + Math.floor(w * cum[i + 1] / total) }));
+    let s = 0; while (s < EOM && slices[s + 1].a <= g) s++;
+    snap({ kind: 'split', t, s, slices, off });
+    l = slices[s].a; r = slices[s].b % R;
+    if (s === EOM) { snap({ kind: 'narrow', t, s, slices }); break; }
+    dec.push(s);
+    snap({ kind: 'narrow', t, s, slices });
+    if (dec.length >= maxSyms) { ok = false; break; }
+    if (spn) {
+      let d0 = -1;
+      if (digit(l, 0) >= sp) d0 = sp; else if (digit(r, 0) < sp || r === sp * S) d0 = sp - 1;
+      if (d0 < 0) snap({ kind: 'flushwait', t });
+      else {
+        const s0 = sp, k = spn;
+        l = shl(l, 1); r = shl(r, 1); g = shl(g, 1) + read(1); spn = 0; sp = 0;
+        snap({ kind: 'flush', t, d0, s0, k, read: 1, zoom: { a: d0 * S, b: (d0 + 1) * S, a2: 0, b2: R } });
+      }
+    }
+    if (spn === 0) {
+      const n = commonLen(l, (r - 1 + R) % R);
+      const pre = Math.floor(l / P ** (N - n));
+      snap({ kind: 'paths', t, n, paths: true, node: { d: n, p: pre } });
+      if (n > 0) {
+        const zoom = { a: pre * P ** (N - n), b: (pre + 1) * P ** (N - n), a2: 0, b2: R };
+        l = shl(l, n); r = shl(r, n); g = shl(g, n) + read(n);
+        snap({ kind: 'pr', t, n, read: n, zoom });
+      }
+    }
+    while (true) {
+      const R0 = big(r);
+      if (!(digit(r, 0) - digit(l, 0) === 1 && digit(l, 1) === P - 1 && digit(r, 1) === 0)) break;
+      const k = digit(r, 0);
+      if (sp === 0) sp = k;
+      spn++;
+      const c = k * S, pl = l, pr = R0, pg = g;
+      l = P * l - (P - 1) * c; r = (P * R0 - (P - 1) * c) % R; g = P * g - (P - 1) * c + read(1);
+      snap({ kind: 'ar', t, k, pl, pr, pg, read: 1, zoom: { a: c - S / P, b: c + S / P, a2: c - S, b2: c + S } });
+    }
+  }
+  snap({ kind: 'done', t: dec.length + 1, ok });
+  return { frames, dec, P, N, R, f, total, EOM, bits };
+}
+/*END*/
+
+const CFG = { P: 3, N: 5, fmax: 53 };
+const PP = CFG.P, NB = CFG.N, RR = PP ** NB, SS = RR / PP;
+const DIG = PP === 2 ? 'bit' : 'trit';
+const SUB = PP === 2 ? '₂' : '₃';
+const SUP = n => String(n).split('').map(c => '⁰¹²³⁴⁵⁶⁷⁸⁹'[c]).join('');
+const FRAC = PP === 2 ? ['0', '½', '1'] : ['0', '⅓', '⅔', '1'];
+const TICKLBL = PP === 2 ? ['0', '1/4', '1/2', '3/4', '1'] : ['0', '', '', '1/3', '', '', '2/3', '', '', '1'];
+const FIXED = Math.ceil(Math.log(5) / Math.log(PP) - 1e-9);
+const NAMES = ['A', 'B', 'C', 'D', 'EOM'];
+const SVAR = ['--s0', '--s1', '--s2', '--s3', '--s4'];
+const X0 = 40, X1 = 960, W = X1 - X0, YT = 22, LH = Math.round(240 / NB);
+const YBAR = YT + NB * LH + 30, BH = 34;
+const $ = id => document.getElementById(id);
+let tr, msg, mode = 'enc', cur = 0, prog = 1, playing = false, last = 0, dwell = 0;
+const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+const gx = i => X0 + i / RR * W;
+const nodeXY = (d, p) => [X0 + (p + 0.5) * PP ** (NB - d) / RR * W, YT + d * LH];
+const rep = x => x.toString(PP).padStart(NB, '0');
+const pref = (x, d) => Math.floor(x / PP ** (NB - d));
+const lerp = (a, b, t) => a + (b - a) * t;
+const ease = t => t < .5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2;
+const pl = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+const symName = s => s === tr.EOM ? 'EOM' : NAMES[s];
+const ivl = (l, r) => `[${l}, ${r})`;
+
+function drawStatic() {
+  let d = '', lbl = '';
+  for (let dep = 0; dep < NB; dep++) for (let p = 0; p < PP ** dep; p++) {
+    const [x, y] = nodeXY(dep, p);
+    for (let c = 0; c < PP; c++) {
+      const [cx, cy] = nodeXY(dep + 1, PP * p + c);
+      d += `M${x.toFixed(1)} ${y}L${cx.toFixed(1)} ${cy}`;
+      if (dep < 2) lbl += `<text class="t-lbl" x="${((x + cx) / 2 + (c === 0 ? -9 : 9)).toFixed(1)}" y="${(y + cy) / 2 + 3}">${c}</text>`;
+    }
+  }
+  let ax = `<rect class="bar-bg" x="${X0}" y="${YBAR}" width="${W}" height="${BH}" rx="3"/>`;
+  const M = PP * PP;
+  for (let k = 0; k <= M; k++) {
+    const x = X0 + k / M * W, major = k % PP === 0;
+    ax += `<line class="tick" x1="${x}" x2="${x}" y1="${YBAR + BH}" y2="${YBAR + BH + (major ? 7 : 4)}"/>`;
+    const t = TICKLBL[k];
+    if (t) ax += `<text class="ticklbl" x="${x}" y="${YBAR + BH + 22}">${t}</text>`;
+  }
+  ax += `<text class="ticklbl" x="${X0 + W / 2}" y="${YBAR + BH + 42}" style="font-size:11px">grid G(${PP}${SUP(NB)}): cell x covers [x, x+1) · ${RR} cells · minor ticks every 1/${M}</text>`;
+  $('static').innerHTML = `<path class="t-edge" d="${d}"/>${lbl}${ax}`;
+}
+
+function pathPts(x, from, to) {
+  const pts = [];
+  for (let d = from; d <= to; d++) pts.push(nodeXY(d, pref(x, d)));
+  return pts.map(([a, b]) => `${a.toFixed(1)},${b}`).join(' ');
+}
+
+function render() {
+  const F = tr.frames[cur], E = cur > 0 ? tr.frames[cur - 1] : F;
+  const e = ease(prog);
+  const l = lerp(E.l, F.l, e), r = lerp(E.r, F.r, e);
+  const leafY = YT + NB * LH;
+  let s = '';
+  if (F.zoom && prog < 1) {
+    const z = F.zoom;
+    const a = lerp(z.a, z.a2, e), b = lerp(z.b, z.b2, e);
+    s += `<rect class="band" x="${gx(a)}" y="${YBAR - 6}" width="${gx(b) - gx(a)}" height="${BH + 12}" rx="4"/>`;
+    if (F.kind !== 'ar') {
+      const yTop = lerp(YT + (F.kind === 'flush' ? 1 : F.n) * LH, YT, e);
+      s += `<path class="band" d="M${gx(a)} ${leafY}L${(gx(a) + gx(b)) / 2} ${yTop}L${gx(b)} ${leafY}Z" style="stroke:none"/>`;
+    }
+  }
+  if (F.kind === 'paths' && F.n > 0) {
+    const [nx, ny] = nodeXY(F.n, F.node.p);
+    const a = F.node.p * PP ** (NB - F.n), b = (F.node.p + 1) * PP ** (NB - F.n);
+    s += `<g style="opacity:${e}"><path class="band" d="M${gx(a)} ${leafY}L${nx} ${ny}L${gx(b)} ${leafY}Z" style="stroke:none"/>
+      <rect class="band" x="${gx(a)}" y="${YBAR - 6}" width="${gx(b) - gx(a)}" height="${BH + 12}" rx="4"/></g>`;
+  }
+  const spShow = F.kind === 'ar' ? F.k : F.spn ? F.sp : (F.kind === 'flush' && prog < 1 ? F.s0 : 0);
+  if (spShow) {
+    const c = spShow * SS, x = gx(c), nb = SS / PP;
+    const o = F.kind === 'flush' ? 1 - e : 1;
+    s += `<g style="opacity:${o}"><line x1="${x}" x2="${x}" y1="${YT + LH}" y2="${YBAR + BH + 4}" style="stroke:var(--ink);stroke-width:1.5;stroke-dasharray:2 3"/>`;
+    if (F.kind !== 'ar' || prog >= 1)
+      s += `<rect class="band" x="${gx(c - nb)}" y="${YBAR - 6}" width="${gx(c + nb) - gx(c - nb)}" height="${BH + 12}" rx="4" style="fill:none"/>`;
+    s += `</g>`;
+  }
+  s += `<rect class="ivalfill" x="${gx(l)}" y="${YBAR}" width="${Math.max(1, gx(r) - gx(l))}" height="${BH}"/>`;
+  if (F.slices) {
+    const op = F.kind === 'split' ? e : 1;
+    F.slices.forEach(sl => {
+      let o = op;
+      if (F.kind === 'narrow' && sl.s !== F.s) o = 1 - e;
+      if (o <= 0.01) return;
+      const xa = gx(sl.a), xb = gx(sl.b);
+      const hot = F.kind === 'narrow' || mode === 'enc' ? sl.s === F.s : sl.s === F.s && prog >= 1;
+      s += `<rect x="${xa}" y="${YBAR}" width="${Math.max(.6, xb - xa - .6)}" height="${BH}" style="fill:var(${SVAR[sl.s]});opacity:${o * (hot ? 1 : .55)}"/>`;
+      const nm = sl.s === tr.EOM ? 'E' : NAMES[sl.s];
+      if (xb - xa > 16) s += `<text class="slicelbl" x="${(xa + xb) / 2}" y="${YBAR + BH / 2 + 5}" style="opacity:${o}">${nm}</text>`;
+    });
+  }
+  s += `<rect class="ival" x="${gx(l)}" y="${YBAR}" width="${Math.max(1, gx(r) - gx(l))}" height="${BH}" rx="2"/>`;
+  s += `<text class="endlbl" x="${gx(l) - 2}" y="${YBAR - 10}" style="fill:var(--lpath);text-anchor:end">l</text>`;
+  s += `<text class="endlbl" x="${gx(r) + 2}" y="${YBAR - 10}" style="fill:var(--rpath);text-anchor:start">r</text>`;
+  if (F.paths) {
+    const L = F.l, Rm = F.r - 1;
+    s += `<g style="opacity:${e}">`;
+    s += `<polyline class="lp" points="${pathPts(L, F.n, NB)}"/><polyline class="rp" points="${pathPts(Rm, F.n, NB)}"/>`;
+    if (F.n > 0) {
+      s += `<polyline class="cp" points="${pathPts(L, 0, F.n)}"/>`;
+      for (let d = 0; d < F.n; d++) {
+        const [x1, y1] = nodeXY(d, pref(L, d)), [x2, y2] = nodeXY(d + 1, pref(L, d + 1));
+        s += `<text class="bitlbl" x="${(x1 + x2) / 2 - 9}" y="${(y1 + y2) / 2 + 4}">${pref(L, d + 1) % PP}</text>`;
+      }
+    } else {
+      const [x, y] = nodeXY(0, 0);
+      s += `<circle cx="${x}" cy="${y}" r="5" style="fill:var(--ink)"/>`;
+    }
+    s += `</g>`;
+  }
+  if (mode === 'enc' && (F.kind === 'final' || F.kind === 'done')) {
+    const x = gx(F.point), o = F.kind === 'final' ? e : 1;
+    s += `<g style="opacity:${o}"><polyline class="cp" points="${pathPts(F.point, 0, F.k)}"/>
+      <line x1="${x}" x2="${x}" y1="${YBAR - 4}" y2="${YBAR + BH + 4}" style="stroke:var(--accent);stroke-width:2.5"/>
+      <circle class="pt" cx="${x}" cy="${YBAR + BH / 2}" r="6"/></g>`;
+  }
+  if (mode === 'dec') {
+    if (F.kind === 'start') s += `<g style="opacity:${e}"><polyline class="gp" points="${pathPts(F.g, 0, NB)}"/></g>`;
+    const g = lerp(E.g, F.g, e), x = gx(g + 0.5);
+    s += `<line x1="${x}" x2="${x}" y1="${YBAR - 2}" y2="${YBAR + BH + 2}" class="gline"/>
+      <path class="gmark" d="M${x} ${YBAR + BH + 3}l-6 10h12z"/><text class="glbl" x="${x}" y="${YBAR + BH + 27}">g</text>`;
+  }
+  $('dyn').innerHTML = s;
+}
+
+const fmtD = (x, n) => { const b = rep(x); return `<span class="bits"><span class="pre">${b.slice(0, n)}</span>${b.slice(n)}</span>`; };
+const fmtG = (F) => `<span class="bits">${rep(F.g)}</span>`;
+
+function narrateEnc(F, i) {
+  const T = msg.length;
+  const which = F.t >= T ? 'End of message' : `Symbol ${F.t + 1} of ${T}`;
+  switch (F.kind) {
+    case 'start': return ['Start: the whole grid', `<p>The interval is <code>[0, ${RR})</code>, which is <code>[0, 1)</code> on the grid G(${PP}${SUP(NB)}). Each of the ${RR} cells is a leaf of the depth-${NB} tree above it.</p><p>Encoding message <b>${msg.map(s => NAMES[s]).join('')}</b> and then an EOM symbol.</p>`];
+    case 'split': return [`${which}: ${symName(F.s)}`, `<p>Split <code>${ivl(F.l, F.r)}</code> (width ${F.r - F.l}) in proportion to the frequencies ${tr.f.join(' : ')} (A, B, C, D, EOM).</p>`];
+    case 'narrow': { const sl = F.slices[F.s]; return [`Keep the ${symName(F.s)} slice`, `<p>The interval becomes <code>${ivl(sl.a, sl.b)}</code>, width ${sl.b - sl.a}. A rarer symbol leaves a narrower slice and releases more output ${DIG}s.</p>`]; }
+    case 'flushwait': return ['Still around ' + FRAC[F.sp], `<p>${pl(F.spn, 'deferred ' + DIG)} pending, and the interval still contains the stable point ${FRAC[F.sp]}, so nothing can be released yet.</p>`];
+    case 'flush': {
+      const right = F.d0 === F.s0;
+      return [`Resolve ${pl(F.k, 'pending ' + DIG)}`, `<p>The interval has moved to the ${right ? 'right' : 'left'} of ${FRAC[F.s0]}. In base ${PP}, points just ${right ? 'above' : 'below'} ${FRAC[F.s0]} start <code>0.${F.d0}${String(F.fill).repeat(3)}…</code>, so output <code>${F.d0}</code> followed by ${F.k}× <code>${F.fill}</code>.</p><p>Then zoom level-1 cell ${F.d0} to the full grid: <code>x ← ${PP}x mod ${RR}</code>.</p>`];
+    }
+    case 'paths': return pathsText(F, 'enc');
+    case 'pr': return [`PR: output ${F.out.slice(-F.n).join('')}, zoom ×${PP ** F.n}`, `<p>The shared prefix is final, so it goes to the output. The subtree becomes the whole tree: <code>l ← l·${PP}^${F.n} mod ${RR}</code>, <code>r ← r·${PP}^${F.n}</code>. In ${PP}-adic terms the first ${pl(F.n, 'digit')} of <code>l^</code> and <code>r^</code> are shifted out.</p><p>New interval <code>${ivl(F.l, F.r)}</code>, width ${F.r - F.l}.</p>`];
+    case 'ar': return arText(F, 'enc');
+    case 'final': {
+      const ds = F.out.slice(-F.k).join('');
+      return ['Close: shortest point in the interval', F.pend
+        ? `<p>The final interval still contains ${FRAC[F.sp]}, so output the single ${DIG} <code>${F.sp}</code>: the point ${FRAC[F.sp]} itself. The pending ${DIG}s would be zeros, and the decoder pads with zeros anyway.</p>`
+        : `<p>Pick the grid point with the shortest base-${PP} expansion inside <code>${ivl(F.l, F.r)}</code>: x = ${F.point} = <code>${rep(F.point)}</code>${SUB}. Output its path <code>${ds}</code>; trailing zeros are dropped because the decoder pads with zeros.</p>`];
+    }
+    case 'done': {
+      const n = F.out.length, fixed = (msg.length + 1) * FIXED;
+      const asBits = PP === 2 ? '' : `, the same information as ${(n * Math.log2(3)).toFixed(1)} bits`;
+      return ['Done', `<p>${pl(msg.length, 'symbol')} + EOM → <b>${n} ${DIG}s</b>: <code>${F.out.join('')}</code>${asBits}.</p><p>The ideal cost under the model, −log${SUB} of the message probability, is ${F.ideal.toFixed(2)} ${DIG}s. The gap of ${(n - F.ideal).toFixed(2)} is the price of a finite grid and the closing point.</p><p>A fixed-length code for 5 symbols needs ${FIXED} ${DIG}s each: ${fixed} ${DIG}s.</p><p>Switch to <b>Decode</b> to watch this code turn back into the message.</p>`];
+    }
+  }
+}
+
+function pathsText(F, m) {
+  const tail = m === 'dec' ? ` The encoder output exactly these ${DIG}s here; the decoder already holds them at the top of g.` : '';
+  if (F.n === 0) return ['Paths split at the root', `<p>The path to <span class="cl">l = ${rep(F.l)}</span> takes branch ${pref(F.l, 1)} and the path to <span class="cr">r−1 = ${rep(F.r - 1)}</span> takes branch ${pref(F.r - 1, 1)} at the root. The ${PP}-adic distance <code>|l^ − (r−1)^|${SUB}</code> is 1: no ${DIG} is settled, so PR rescaling does nothing.</p>`];
+  return [`Shared prefix ${rep(F.l).slice(0, F.n)}`, `<p>The paths to <span class="cl">l = ${rep(F.l)}</span> and <span class="cr">r−1 = ${rep(F.r - 1)}</span> (base ${PP}) share the first ${pl(F.n, 'edge')}, so <code>|l^ − (r−1)^|${SUB} = ${PP}^−${F.n}</code>. Every cell of the interval lies in the shaded subtree.${tail}</p>`];
+}
+
+function arText(F, m) {
+  const c = F.k * SS;
+  const gpart = m === 'dec' ? ` The decoder applies the same map to g, then reads one more ${DIG} into its last digit: g = ${F.pg} → ${F.g}.` : ` ${pl(F.spn, DIG)} now deferred.`;
+  return [`AR: stretch ×${PP} around ${FRAC[F.k]} (pending ${F.spn})`, `<p>Before: <code>${ivl(F.pl, F.pr)}</code>. In base ${PP}, l starts <code>${F.k - 1}${PP - 1}</code> and r starts <code>${F.k}0</code>: the interval lies within 1/${PP * PP} of the level-1 point ${FRAC[F.k]} = ${c} and contains it, so its first ${DIG} is ${F.k - 1} or ${F.k} and nothing tells which yet.</p><p>AR rescaling removes path digit 1 from the edges, which stretches the neighbourhood ×${PP} around ${FRAC[F.k]}: <code>x ← ${PP}x − ${(PP - 1) * c}</code>.${gpart}</p>`];
+}
+
+function narrateDec(F) {
+  switch (F.kind) {
+    case 'start': return ['Start: read the first ' + NB + ' ' + DIG + 's', `<p>The decoder reads the first ${NB} ${DIG}s of the code, <code>${tr.bits.slice(0, NB).join('') + (tr.bits.length < NB ? '0'.repeat(NB - tr.bits.length) : '')}</code>, as a grid index: g = ${rep(F.g)}${SUB} = ${F.g}, the point 0.${rep(F.g)}${SUB}. Missing ${DIG}s past the end count as zeros.</p><p>From here the decoder repeats every move of the encoder. It does not know the symbols, but g always sits inside the encoder's interval, so g shows which slice the encoder chose.</p>`];
+    case 'split': {
+      const sl = F.slices[F.s];
+      return [`g lies in the ${symName(F.s)} slice`, `<p>Split <code>${ivl(F.l, F.r)}</code> with the same model: frequencies ${tr.f.join(' : ')}. The point g = ${F.g} falls in <code>${ivl(sl.a, sl.b)}</code>, the slice of <b>${symName(F.s)}</b>.</p>`];
+    }
+    case 'narrow': {
+      const sl = F.slices[F.s];
+      if (F.s === tr.EOM) return ['EOM: the message ends', `<p>g is in the EOM slice, so decoding stops. No more ${DIG}s are needed.</p>`];
+      return [`Output ${symName(F.s)}`, `<p>The decoded message grows to <b>${F.dec.map(s => NAMES[s]).join('')}</b>. Narrow to <code>${ivl(sl.a, sl.b)}</code>, exactly as the encoder did.</p>`];
+    }
+    case 'flushwait': return ['Still around ' + FRAC[F.sp], `<p>The interval still contains the stable point ${FRAC[F.sp]}, so the encoder released nothing here and the decoder reads nothing.</p>`];
+    case 'flush': return [`Resolve pending AR (${pl(F.k, DIG)})`, `<p>The interval has left ${FRAC[F.s0]}, so the encoder output its ${F.k + 1} deferred ${DIG}s here. The decoder zooms level-1 cell ${F.d0} as well: <code>x ← ${PP}x mod ${RR}</code> for l, r and g, and reads one ${DIG} into the end of g.</p>`];
+    case 'paths': return pathsText(F, 'dec');
+    case 'pr': return [`PR: zoom ×${PP ** F.n}, read ${pl(F.n, DIG)}`, `<p>Drop the shared ${pl(F.n, 'digit')} from l, r and g: <code>x ← x·${PP}^${F.n} mod ${RR}</code>. The top of g has shifted out, so read the next ${pl(F.n, DIG)} of the code into its bottom: g = ${rep(F.g)}${SUB} = ${F.g}.</p>`];
+    case 'ar': return arText(F, 'dec');
+    case 'done': return F.ok
+      ? ['Done', `<p>Decoded <b>${F.dec.map(s => NAMES[s]).join('')}</b> (${pl(F.dec.length, 'symbol')}) from ${pl(tr.bits.length, DIG)}. ${F.pos > tr.bits.length ? `The decoder looked ${pl(F.pos - tr.bits.length, DIG)} past the end, reading the zeros the encoder dropped.` : ''}</p>${msg && F.dec.join() === msg.join() ? '<p>It matches the encoded message.</p>' : ''}`]
+      : ['Stopped', `<p>No EOM after ${F.dec.length} symbols, so this code was not produced by the encoder with this model. Decoding stopped.</p>`];
+  }
+}
+
+const PHASE = { start: 'init', split: 'model', narrow: 'model', flushwait: 'AR wait', flush: 'AR flush', paths: 'PR check', pr: 'PR rescale', ar: 'AR rescale', final: 'close', done: 'result' };
+
+function updatePanels() {
+  const F = tr.frames[cur];
+  const [title, html] = mode === 'enc' ? narrateEnc(F, cur) : narrateDec(F);
+  $('stepNo').textContent = `step ${cur + 1} / ${tr.frames.length}`;
+  $('phase').textContent = PHASE[F.kind];
+  $('nTitle').textContent = title;
+  $('nText').innerHTML = html;
+  const n = F.paths ? F.n : 0;
+  $('kv').innerHTML =
+    `<dt class="cl">l</dt><dd>${fmtD(F.l % RR, n)}${SUB} = ${F.l}</dd>` +
+    `<dt class="cr">r−1</dt><dd>${fmtD(F.r - 1, n)}${SUB} = ${F.r - 1}</dd>` +
+    (mode === 'dec' ? `<dt>g</dt><dd>${fmtG(F)}${SUB} = ${F.g}</dd>` : '') +
+    `<dt>width</dt><dd>${F.r - F.l} / ${RR}</dd>` +
+    `<dt>stable pt</dt><dd>${F.spn ? FRAC[F.sp] + ' (' + F.sp * SS + ')' : '—'}</dd>` +
+    `<dt>pending</dt><dd>${F.spn}</dd>`;
+  let o = '';
+  if (mode === 'enc') {
+    o = F.out.map((b, j) => `<span class="chip${j >= F.out.length - F.newBits ? ' new' : ''}">${b}</span>`).join('');
+    if (F.spn) {
+      o += `<span class="chip pend wide" title="next ${DIG}">${F.sp - 1}|${F.sp}</span>`;
+      for (let j = 0; j < F.spn; j++) o += `<span class="chip pend wide" title="follower">${PP - 1}|0</span>`;
+      $('pendNote').textContent = `Pending: either ${F.sp - 1} then ${F.spn}× ${PP - 1}, or ${F.sp} then ${F.spn}× 0.`;
+    } else $('pendNote').textContent = '';
+    $('outH').textContent = `Output ${DIG}s`;
+  } else {
+    const len = Math.max(tr.bits.length, F.pos);
+    for (let j = 0; j < len; j++) {
+      const ghost = j >= tr.bits.length;
+      const cls = j >= F.pos ? '' : j >= F.pos - F.read ? ' new' : ' used';
+      o += `<span class="chip${cls}${ghost ? ' ghost' : ''}"${ghost ? ' title="padding zero"' : ''}>${ghost ? 0 : tr.bits[j]}</span>`;
+    }
+    $('pendNote').textContent = `Read ${Math.min(F.pos, len)} of ${tr.bits.length}${F.pos > tr.bits.length ? ' (+ padding zeros)' : ''}. Highlighted: read in this step.`;
+    $('outH').textContent = `Input ${DIG}s`;
+  }
+  $('out').innerHTML = o || `<span style="color:var(--muted);font-size:13px">no ${DIG}s yet</span>`;
+  if (mode === 'enc') {
+    $('msgH').textContent = 'Message';
+    $('msgView').innerHTML = msg.concat([tr.EOM]).map((s, j) =>
+      `<span class="${j === F.t ? 'cur' : j < F.t ? 'done' : ''}" style="background:var(${SVAR[s]})">${s === tr.EOM ? 'E' : NAMES[s]}</span>`).join('');
+  } else {
+    $('msgH').textContent = 'Decoded';
+    const shown = F.dec.slice();
+    let h = shown.map((s, j) => `<span class="done${F.kind === 'narrow' && j === shown.length - 1 ? ' cur' : ''}" style="background:var(${SVAR[s]})">${NAMES[s]}</span>`).join('');
+    if (F.kind === 'narrow' && F.s === tr.EOM) h += `<span class="cur" style="background:var(${SVAR[4]})">E</span>`;
+    $('msgView').innerHTML = h || '<span style="color:var(--muted);font-size:13px;width:auto;opacity:1">nothing yet</span>';
+  }
+  $('scrub').value = cur;
+}
+
+function go(i, animate) {
+  cur = Math.max(0, Math.min(tr.frames.length - 1, i));
+  prog = animate && !reduce ? 0 : 1;
+  updatePanels(); render();
+}
+const speed = () => +$('speed').value;
+function tick(ts) {
+  if (CFG.frozen) return;
+  const dt = last ? Math.min(100, ts - last) : 16; last = ts;
+  if (prog < 1) {
+    const dur = (tr.frames[cur].zoom ? 1100 : 700) / speed();
+    prog = Math.min(1, prog + dt / dur); render();
+  } else if (playing) {
+    dwell += dt;
+    if (dwell > 1600 / speed()) {
+      dwell = 0;
+      if (cur < tr.frames.length - 1) go(cur + 1, true); else setPlay(false);
+    }
+  }
+  requestAnimationFrame(tick);
+}
+function setPlay(p) {
+  playing = p; dwell = 0;
+  $('playBtn').textContent = p ? '❚❚ Pause' : '▶ Play';
+  if (p && cur === tr.frames.length - 1) go(0, false);
+}
+
+function readInputs() {
+  const txt = $('msgIn').value.toUpperCase().replace(/[^A-D]/g, '');
+  const fr = ['fA', 'fB', 'fC', 'fD'].map(id => Math.max(1, Math.floor(+$(id).value || 1)));
+  const tot = fr.reduce((a, b) => a + b, 0) + 1;
+  if (tot > CFG.fmax) { $('err').textContent = `Total frequency ${tot} is too large for the ${PP}${SUP(NB)} grid; keep it at ${CFG.fmax} or less.`; return null; }
+  if (!txt) { $('err').textContent = 'Type a message using the letters A, B, C and D.'; return null; }
+  $('msgIn').value = txt;
+  return { fr, m: [...txt].map(c => c.charCodeAt(0) - 65) };
+}
+function fillCode() {
+  const inp = readInputs(); if (!inp) return false;
+  $('codeIn').value = buildTrace(inp.fr, inp.m, PP, NB).bits.join('');
+  return true;
+}
+
+function load() {
+  $('err').textContent = '';
+  const inp = readInputs(); if (!inp) return;
+  msg = inp.m;
+  if (mode === 'enc') tr = buildTrace(inp.fr, msg, PP, NB);
+  else {
+    const raw = $('codeIn').value.replace(/\s/g, '');
+    const re = PP === 2 ? /^[01]*$/ : /^[012]*$/;
+    if (!re.test(raw)) { $('err').textContent = `The code may only contain the digits 0–${PP - 1}.`; return; }
+    const bits = [...raw].map(Number);
+    const enc = buildTrace(inp.fr, msg, PP, NB).bits.join('');
+    if (raw !== enc) msg = null;
+    tr = buildDecodeTrace(inp.fr, bits, PP, NB, 40);
+  }
+  $('scrub').max = tr.frames.length - 1;
+  $('model').innerHTML = tr.f.map((v, s) => `<tr><td><span class="sw" style="background:var(${SVAR[s]})"></span>${symName(s)}</td><td>${v}</td><td>${v}/${tr.total}</td><td>${(-Math.log(v / tr.total) / Math.log(PP)).toFixed(2)}</td></tr>`).join('');
+  go(0, false);
+}
+
+function setMode(m) {
+  mode = m;
+  $('mEnc').setAttribute('aria-pressed', m === 'enc');
+  $('mDec').setAttribute('aria-pressed', m === 'dec');
+  $('codeField').hidden = m !== 'dec';
+  $('fillBtn').hidden = m !== 'dec';
+  $('gLegend').hidden = m !== 'dec';
+  if (m === 'dec' && !fillCode()) return;
+  setPlay(false); load();
+}
+
+$('mEnc').onclick = () => setMode('enc');
+$('mDec').onclick = () => setMode('dec');
+$('fillBtn').onclick = () => { if (fillCode()) { setPlay(false); load(); } };
+$('encBtn').onclick = () => { setPlay(false); if (mode === 'dec' && document.activeElement !== $('codeIn') && $('codeIn').dataset.edited !== '1') fillCode(); load(); };
+$('codeIn').addEventListener('input', () => { $('codeIn').dataset.edited = '1'; });
+$('fillBtn').addEventListener('click', () => { $('codeIn').dataset.edited = ''; });
+for (const id of ['msgIn', 'codeIn']) $(id).addEventListener('keydown', e => { if (e.key === 'Enter') $('encBtn').click(); });
+$('playBtn').onclick = () => setPlay(!playing);
+$('fwdBtn').onclick = () => { setPlay(false); go(cur + 1, true); };
+$('backBtn').onclick = () => { setPlay(false); go(cur - 1, false); };
+$('resetBtn').onclick = () => { setPlay(false); go(0, false); };
+$('scrub').oninput = e => { setPlay(false); go(+e.target.value, false); };
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+  if (e.key === 'ArrowRight') { setPlay(false); go(cur + 1, true); }
+  else if (e.key === 'ArrowLeft') { setPlay(false); go(cur - 1, false); }
+  else if (e.key === ' ') { e.preventDefault(); setPlay(!playing); }
+});
+drawStatic();
+load();
+requestAnimationFrame(tick);
+
+// ?shot=enc|dec,FRAME,PROGRESS renders one still frame (used to record docs/img/*.gif)
+(function () {
+  const q = new URLSearchParams(location.search).get('shot');
+  if (!q) return;
+  const [m, f, p] = q.split(',');
+  CFG.frozen = true;
+  document.documentElement.classList.add('capture');
+  if (m === 'dec') setMode('dec');
+  cur = +f; prog = 1; updatePanels(); prog = +p; render();
+})();
+</script>
