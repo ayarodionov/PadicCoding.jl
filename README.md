@@ -26,6 +26,27 @@ works with fixed-precision integers on arbitrarily long messages. For `P = 2`
 the algorithm is an integer variant of classic arithmetic coding; for special
 models it reproduces Huffman and Golomb-Rice codes exactly.
 
+## Animations
+
+Click an animation to open the interactive version, where you can step back and forth, type your own
+message or code, and change the model frequencies. Both pages are listed at
+<https://ayarodionov.github.io/PadicCoding.jl/>.
+
+<table>
+<tr><th></th><th><code>P = 2</code>, grid G(2<sup>8</sup>)</th><th><code>P = 3</code>, grid G(3<sup>5</sup>)</th></tr>
+<tr><th>Encode</th>
+<td><a href="https://ayarodionov.github.io/PadicCoding.jl/padic2.html"><img src="docs/img/padic2-enc.gif" alt="P = 2 encoder animation" width="400"></a></td>
+<td><a href="https://ayarodionov.github.io/PadicCoding.jl/padic3.html"><img src="docs/img/padic3-enc.gif" alt="P = 3 encoder animation" width="400"></a></td></tr>
+<tr><th>Decode</th>
+<td><a href="https://ayarodionov.github.io/PadicCoding.jl/padic2.html"><img src="docs/img/padic2-dec.gif" alt="P = 2 decoder animation" width="400"></a></td>
+<td><a href="https://ayarodionov.github.io/PadicCoding.jl/padic3.html"><img src="docs/img/padic3-dec.gif" alt="P = 3 decoder animation" width="400"></a></td></tr>
+</table>
+
+The tree paths to the interval edges `l` and `r−1` are blue and red; their common prefix (amber) is
+what PR rescaling outputs. Dashed outlines mark the region that is zoomed to the full grid. In the
+decoder, the black marker `g` is the point read from the code; it always lies in the slice of the
+next symbol. The pages are plain HTML with no build step, so they also work when opened from a clone.
+
 ## Files
 
 | File | Contents |
@@ -39,7 +60,8 @@ models it reproduces Huffman and Golomb-Rice codes exactly.
 | `demos/ipv6_demo.jl` | IPv6 address list compression (flat vs. per-byte-position model) |
 | `demos/ipv6_split_demo.jl` | IPv6 compression with a dictionary prefix model + per-field coding |
 | `demos/kalman_demo.jl` | Numeric signal compression with Kalman-filter predictive models (adaptive coder) |
-| `demos/padic2_animation.html` | Browser animation of the `P = 2` coder: tree paths, PR and AR rescaling, step by step |
+| `docs/padic2.html`, `docs/padic3.html` | Interactive encode / decode animations for `P = 2` and `P = 3` (served by GitHub Pages) |
+| `docs/img/*.gif` | Recorded runs of the animations, shown below |
 | `demos/cpp/padic2.hpp` | C++ port of `PadicCoding2` (bit-identical `P = 2` coder) |
 | `demos/cpp/padic2_bench.cpp` | C++ throughput benchmark, matches `demos/benchmark.jl`'s workload |
 | `p-adic_arithm_coding.pdf` | The paper |
