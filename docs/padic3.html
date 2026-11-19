@@ -153,7 +153,7 @@ body { margin: 0; }
       <div class="freqs"><input type="number" id="fA" min="1" max="26" value="4" aria-label="Frequency of A"><input type="number" id="fB" min="1" max="26" value="2" aria-label="Frequency of B"><input type="number" id="fC" min="1" max="26" value="1" aria-label="Frequency of C"><input type="number" id="fD" min="1" max="26" value="1" aria-label="Frequency of D"></div></div>
     <div class="field" id="codeField" hidden><label for="codeIn">Code (trits)</label><input type="text" id="codeIn" class="code" spellcheck="false" autocomplete="off"></div>
     <button id="fillBtn" hidden title="Replace the code with the encoding of the message">Use message code</button>
-    <button class="primary" id="encBtn">Run</button>
+    <button class="primary" id="encBtn" title="Apply the message, frequencies and code, then play from the start (Enter)">▶ Run</button>
     <div class="transport" aria-label="Playback">
       <button id="resetBtn" title="Back to start">⏮</button>
       <button id="backBtn" title="Previous step (←)">◀</button>
@@ -660,13 +660,13 @@ function fillCode() {
 
 function load() {
   $('err').textContent = '';
-  const inp = readInputs(); if (!inp) return;
+  const inp = readInputs(); if (!inp) return false;
   msg = inp.m;
   if (mode === 'enc') tr = buildTrace(inp.fr, msg, PP, NB);
   else {
     const raw = $('codeIn').value.replace(/\s/g, '');
     const re = PP === 2 ? /^[01]*$/ : /^[012]*$/;
-    if (!re.test(raw)) { $('err').textContent = `The code may only contain the digits 0–${PP - 1}.`; return; }
+    if (!re.test(raw)) { $('err').textContent = `The code may only contain the digits 0–${PP - 1}.`; return false; }
     const bits = [...raw].map(Number);
     const enc = buildTrace(inp.fr, msg, PP, NB).bits.join('');
     if (raw !== enc) msg = null;
@@ -675,6 +675,7 @@ function load() {
   $('scrub').max = tr.frames.length - 1;
   $('model').innerHTML = tr.f.map((v, s) => `<tr><td><span class="sw" style="background:var(${SVAR[s]})"></span>${symName(s)}</td><td>${v}</td><td>${v}/${tr.total}</td><td>${(-Math.log(v / tr.total) / Math.log(PP)).toFixed(2)}</td></tr>`).join('');
   go(0, false);
+  return true;
 }
 
 function setMode(m) {
@@ -691,7 +692,11 @@ function setMode(m) {
 $('mEnc').onclick = () => setMode('enc');
 $('mDec').onclick = () => setMode('dec');
 $('fillBtn').onclick = () => { if (fillCode()) { setPlay(false); load(); } };
-$('encBtn').onclick = () => { setPlay(false); if (mode === 'dec' && document.activeElement !== $('codeIn') && $('codeIn').dataset.edited !== '1') fillCode(); load(); };
+$('encBtn').onclick = () => {
+  setPlay(false);
+  if (mode === 'dec' && $('codeIn').dataset.edited !== '1') fillCode();
+  if (load()) setPlay(true);            // apply the inputs and play from the start
+};
 $('codeIn').addEventListener('input', () => { $('codeIn').dataset.edited = '1'; });
 $('fillBtn').addEventListener('click', () => { $('codeIn').dataset.edited = ''; });
 for (const id of ['msgIn', 'codeIn']) $(id).addEventListener('keydown', e => { if (e.key === 'Enter') $('encBtn').click(); });
