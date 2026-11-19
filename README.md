@@ -39,6 +39,7 @@ models it reproduces Huffman and Golomb-Rice codes exactly.
 | `demos/ipv6_demo.jl` | IPv6 address list compression (flat vs. per-byte-position model) |
 | `demos/ipv6_split_demo.jl` | IPv6 compression with a dictionary prefix model + per-field coding |
 | `demos/kalman_demo.jl` | Numeric signal compression with Kalman-filter predictive models (adaptive coder) |
+| `demos/padic2_animation.html` | Browser animation of the `P = 2` coder: tree paths, PR and AR rescaling, step by step |
 | `demos/cpp/padic2.hpp` | C++ port of `PadicCoding2` (bit-identical `P = 2` coder) |
 | `demos/cpp/padic2_bench.cpp` | C++ throughput benchmark, matches `demos/benchmark.jl`'s workload |
 | `p-adic_arithm_coding.pdf` | The paper |
