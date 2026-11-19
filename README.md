@@ -61,7 +61,7 @@ next symbol. The pages are plain HTML with no build step, so they also work when
 | `demos/ipv6_split_demo.jl` | IPv6 compression with a dictionary prefix model + per-field coding |
 | `demos/kalman_demo.jl` | Numeric signal compression with Kalman-filter predictive models (adaptive coder) |
 | `docs/padic2.html`, `docs/padic3.html` | Interactive encode / decode animations for `P = 2` and `P = 3` (served by GitHub Pages) |
-| `docs/img/*.gif` | Recorded runs of the animations, shown below |
+| `docs/img/*.gif` | Recorded runs of the animations, shown above |
 | `demos/cpp/padic2.hpp` | C++ port of `PadicCoding2` (bit-identical `P = 2` coder) |
 | `demos/cpp/padic2_bench.cpp` | C++ throughput benchmark, matches `demos/benchmark.jl`'s workload |
 | `p-adic_arithm_coding.pdf` | The paper |
