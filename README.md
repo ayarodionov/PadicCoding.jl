@@ -225,9 +225,11 @@ string:
 - In a real system the stream is cut into short *oligos* (oligonucleotides):
   single-stranded DNA molecules made by chemical synthesis, base by base.
   Errors and cost grow with length, so synthesis gives reliable strands of only
-  about 100–300 nt (Goldman et al. used 117 nt, 100 of them data). The oligos
-  are made in parallel, kept as an unordered pool and read back by sequencing,
-  so each one also carries an index and often redundancy. An arithmetic code makes one substitution corrupt the rest of
+  about 100–300 nt. The oligos are made in parallel, kept as an unordered pool
+  and read back by sequencing, so each one also carries an index and often
+  redundancy. Goldman et al. used 117-nt oligos: a 100-nt segment of the coded
+  stream plus index and parity, with consecutive segments overlapping by 75 nt
+  (each base stored four times). An arithmetic code makes one substitution corrupt the rest of
   its block, while Huffman resynchronizes, so each block would be coded on its
   own. With this coder every block pays for its EOM symbol (frequency 1 of
   about 150 000, so `log3 150000 ≈ 11` trits): 10.4 extra trits per block,
