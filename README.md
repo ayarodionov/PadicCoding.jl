@@ -222,8 +222,12 @@ string:
   here (1.6% on the project's own text and source).
 - Writing 2 bits per base is 21% denser, but it gives thousands of runs of 4
   or more equal bases. The rotating code never repeats a base.
-- In a real system the stream is cut into short oligos with indexes and
-  redundancy. An arithmetic code makes one substitution corrupt the rest of
+- In a real system the stream is cut into short *oligos* (oligonucleotides):
+  single-stranded DNA molecules made by chemical synthesis, base by base.
+  Errors and cost grow with length, so synthesis gives reliable strands of only
+  about 100–300 nt (Goldman et al. used 117 nt, 100 of them data). The oligos
+  are made in parallel, kept as an unordered pool and read back by sequencing,
+  so each one also carries an index and often redundancy. An arithmetic code makes one substitution corrupt the rest of
   its block, while Huffman resynchronizes, so each block would be coded on its
   own. With this coder every block pays for its EOM symbol (frequency 1 of
   about 150 000, so `log3 150000 ≈ 11` trits): 10.4 extra trits per block,
