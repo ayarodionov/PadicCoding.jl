@@ -60,6 +60,7 @@ next symbol. The pages are plain HTML with no build step, so they also work when
 | `demos/ipv6_demo.jl` | IPv6 address list compression (flat vs. per-byte-position model) |
 | `demos/ipv6_split_demo.jl` | IPv6 compression with a dictionary prefix model + per-field coding |
 | `demos/kalman_demo.jl` | Numeric signal compression with Kalman-filter predictive models (adaptive coder) |
+| `demos/ternary_demo.jl` | Binary vs. ternary coding: arithmetic (P = 2, 3) and Huffman (D = 2, 3) rates, radix-economy cost |
 | `docs/padic2.html`, `docs/padic3.html` | Interactive encode / decode animations for `P = 2` and `P = 3` (served by GitHub Pages) |
 | `docs/img/*.gif` | Recorded runs of the animations, shown above |
 | `demos/cpp/padic2.hpp` | C++ port of `PadicCoding2` (bit-identical `P = 2` coder) |
@@ -116,6 +117,7 @@ julia --project demos/ip_demo.jl
 julia --project demos/ipv6_demo.jl
 julia --project demos/ipv6_split_demo.jl
 julia --project demos/kalman_demo.jl
+julia --project demos/ternary_demo.jl
 ```
 
 ## API
@@ -167,6 +169,27 @@ from the adaptive coder:
 The Kalman predictive Gaussian `N(mu, S)` supplies both the centre and a
 calibrated width; mixing filters with different noise levels lets the model
 follow regime changes, which no single fixed filter can.
+
+## Binary vs. ternary demo
+
+`demos/ternary_demo.jl` asks whether a ternary machine (digits 0, 1, 2)
+compresses better because 3 is closer to `e` than 2. It codes four sources in
+both bases and converts the output to bits (1 trit = log2 3 = 1.585 bits):
+
+| Source | arith P=2 | arith P=3 | Huffman D=2 | Huffman D=3 | cost P=2 / P=3 |
+|---|---|---|---|---|---|
+| uniform {1/3, 1/3, 1/3} | 1.5858 | 1.5858 | 1.6663 | **1.5850** | 95148 / 90045 |
+| dyadic {1/2, 1/4, 1/4} | 1.4961 | 1.4962 | **1.4955** | 1.5850 | 89768 / 84960 |
+| uniform bytes | 8.0004 | 8.0006 | **8.0000** | 8.0504 | 480024 / 454302 |
+| text bytes | 4.0961 | 4.0961 | 4.1392 | 4.1932 | 245764 / 232590 |
+
+Rates are bits/symbol for 30 000 symbols. Information does not depend on the
+base: the arithmetic coder reaches the entropy for both `P`. A symbol-by-symbol
+Huffman code is better only in the base that matches the probabilities. The
+`e` argument is *radix economy*: if a digit cell costs in proportion to its
+number of states, storing information costs `b / ln b` per nat, which is
+smallest at `b = e`. Ternary is 5.36% cheaper than binary in that model (the
+last column, digits × radix), but the compressed output is no smaller.
 
 ## Performance
 
