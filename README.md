@@ -199,6 +199,70 @@ number of states, storing information costs `b / ln b` per nat, which is
 smallest at `b = e`. Ternary is 5.36% cheaper than binary in that model (the
 last column, digits × radix), but the compressed output is no smaller.
 
+## DNA storage demo
+
+DNA synthesis and sequencing make many errors on homopolymers (runs of the
+same base). Goldman et al. (*Nature* 494, 2013) avoid them completely with a
+*rotating code*: data is written as trits, and each trit selects one of the 3
+bases that differ from the previous base. The channel is then exactly
+ternary, `log2 3 = 1.585` bits per nucleotide (nt). They produce the trits
+with a ternary Huffman code over bytes. `demos/dna_demo.jl` uses the same
+static byte model for three paths and decodes each one back from the DNA
+string:
+
+| Path (150 KB of `/usr/share/dict/words`) | nt | nt/byte | vs. P = 3 | longest run | runs ≥ 4 |
+|---|---|---|---|---|---|
+| floor: entropy / log2 3 | 393 043 | 2.6203 | | | |
+| ternary Huffman + rotating code (Goldman) | 402 700 | 2.6847 | +2.45% | 1 | 0 |
+| **P = 3 coder + rotating code** | **393 055** | **2.6204** | 0 | 1 | 0 |
+| P = 2 coder, 2 bits per base | 311 488 | 2.0766 | −20.75% | 10 | 3 712 |
+
+- The P = 3 coder writes trits directly and ends 12 nt above the floor. The
+  Huffman code spends a whole number of trits on each byte and loses 2.45%
+  here (1.6% on the project's own text and source).
+- Writing 2 bits per base is 21% denser, but it gives thousands of runs of 4
+  or more equal bases. The rotating code never repeats a base.
+- In a real system the stream is cut into short oligos with indexes and
+  redundancy. An arithmetic code makes one substitution corrupt the rest of
+  its block, while Huffman resynchronizes, so each block would be coded on its
+  own. With this coder every block pays for its EOM symbol (frequency 1 of
+  about 150 000, so `log3 150000 ≈ 11` trits): 10.4 extra trits per block,
+  measured. That beats Huffman only for blocks above about 160 bytes
+  (≈ 425 nt); on 100-nt oligos it costs +10.5%. Short oligos would need a
+  known block length instead of an EOM symbol, which the coder does not have
+  yet.
+
+## PAM-3 demo
+
+A PAM-3 link sends one of 3 voltage levels per symbol, at most
+`log2 3 = 1.585` bits. Binary data is converted to symbols with small block
+codes. `demos/pam3_demo.jl` converts the output of the P = 2 coder with
+several block codes and with one whole-message base conversion, and compares
+it with the P = 3 coder, which writes symbols directly. Every path is decoded
+and checked:
+
+| Path (150 KB of `/usr/share/dict/words`) | symbols | vs. P = 3 |
+|---|---|---|
+| raw bytes, 3 bits → 2 symbols (no compression) | 800 000 | +103.5% |
+| P = 2 coder, 3 bits → 2 symbols (94.6% efficient) | 415 318 | +5.66% |
+| P = 2 coder, 11 bits → 7 symbols (99.1%) | 396 445 | +0.86% |
+| P = 2 coder, 19 bits → 12 symbols (99.9%) | 393 468 | +0.11% |
+| P = 2 coder, whole message converted to base 3 | 393 055 | 0.00% |
+| **P = 3 coder, direct** | **393 055** | 0 |
+
+The floor is 393 043 symbols; the project's own text gives the same
+percentages.
+
+- Against 3 bits → 2 symbols, the P = 3 coder saves the expected 5.7%
+  (`1 − 1.5 / log2 3`).
+- Larger block codes recover almost all of it: 19 bits → 12 symbols is only
+  0.11% behind. Converting the whole message as one big integer matches the
+  P = 3 coder exactly, but it needs the whole message first and big-integer
+  arithmetic.
+- So the P = 3 coder is not better at compression here. Its advantage is that
+  it needs no separate conversion stage: it is a streaming, fixed-precision
+  coder that already speaks the channel's alphabet.
+
 ## Performance
 
 `benchmark.jl` on an Apple-silicon Mac, Julia 1.12, 10^6 symbols of a skewed
