@@ -16,9 +16,16 @@
 #       is denser but has homopolymers.
 # Every path is decoded back from the DNA string and checked.
 #
-# The second part cuts the data into oligos with a fixed payload of L nt, as in
-# real DNA storage (each oligo is synthesized and read separately), and counts
-# how many oligos each code needs:
+# An oligo (oligonucleotide) is a short single-stranded DNA molecule made by
+# chemical synthesis, base by base.  Errors and cost grow with length, so
+# synthesis gives reliable strands of only about 100-300 nt, and stored data is
+# split over many oligos.  They are made in parallel, kept as an unordered
+# pool, and read back by sequencing, so each oligo also carries an index (and
+# often redundancy).  Goldman et al. used 117-nt oligos with 100 nt of data.
+#
+# The second part cuts the data into oligos with a fixed payload of L nt (the
+# data part, index and redundancy not counted), each coded on its own, and
+# counts how many oligos each code needs:
 #   (a) ternary Huffman: codewords until the next one does not fit; the rest
 #       is padded with a prefix of that codeword, so the decoder stops there;
 #   (b) P = 3 coder with EOM, the longest prefix that fits;

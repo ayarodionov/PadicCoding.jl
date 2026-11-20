@@ -144,7 +144,8 @@ julia --project demos/composite_p_test.jl
   for a byte model built from 150 KB of text). Useful for many short blocks.
 - `padic_fill(m, msg, L; start = 1) -> (k, digits)` — fixed code length: codes
   the longest prefix `msg[start : start+k-1]` that fits in `L` digits (for
-  example one DNA oligo or one link frame); padding `digits` with zeros to `L`
+  example one DNA oligo, a short synthetic DNA strand of about 100–300
+  nucleotides, or one link frame); padding `digits` with zeros to `L`
   does not change the result. Decode with `padic_decode_fixed(m, digits, k)`,
   so `k` must be sent too, e.g. in a small header.
 - `padic_encode_pr(m, msg)` / `padic_decode_pr(m, bits)` — basic algorithm
