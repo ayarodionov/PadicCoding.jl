@@ -21,7 +21,9 @@
 # synthesis gives reliable strands of only about 100-300 nt, and stored data is
 # split over many oligos.  They are made in parallel, kept as an unordered
 # pool, and read back by sequencing, so each oligo also carries an index (and
-# often redundancy).  Goldman et al. used 117-nt oligos with 100 nt of data.
+# often redundancy).  Goldman et al. used 117-nt oligos: a 100-nt segment of
+# the coded stream plus index and parity; consecutive segments overlap by 75 nt,
+# so each base is stored four times and an oligo adds 25 nt of new data.
 #
 # The second part cuts the data into oligos with a fixed payload of L nt (the
 # data part, index and redundancy not counted), each coded on its own, and
