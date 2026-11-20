@@ -61,7 +61,7 @@ struct PadicModel2 {
         }
         cum.push_back(cum.back() + 1);  // EOM symbol, frequency 1
         total = cum.back();
-        if (total > (u64(1) << (N - 1)) - 1)
+        if (total > (u64(1) << (N - 2)) + 1)  // width bound 2^(N-2) + 1
             throw std::invalid_argument("grid level N too small for total frequency");
         R = u64(1) << N;
         mask = R - 1;

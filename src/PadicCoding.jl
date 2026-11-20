@@ -91,9 +91,11 @@ symbol frequencies; a special EOM symbol (index `length(freqs) + 1`) with
 frequency 1 is appended.  `P` must be a prime, `N` is the grid level: all
 interval edges are indexes of the grid G(P^N).
 
-The revised (PR + AR) algorithm guarantees the current interval is never
-shorter than 2/P^2 - 1/P^N, so the total frequency must not exceed
-2*P^(N-2) - 1.
+The revised (PR + AR) algorithm keeps the current interval at least
+P^(N-2) + 1 grid cells wide (1/P^2 + 1/P^N of [0, 1)), so the total frequency
+must not exceed P^(N-2) + 1.  The paper states 2/P^2 - 1/P^N, but an
+interval straddling a level-1 point with l[1] < P-1 or r[1] > 0 is rescaled
+by neither PR nor AR and can be just over 1/P^2 wide.
 """
 struct PadicModel
     P::Int
@@ -109,7 +111,7 @@ function PadicModel(freqs::AbstractVector{<:Integer}; P::Int = 2, N::Int)
     cum = cumsum(vcat(0, Vector{Int}(freqs), 1))  # EOM gets weight 1
     total = cum[end]
     R = I128(P)^N
-    total <= 2 * (R ÷ (I128(P) * P)) - 1 ||
+    total <= R ÷ (I128(P) * P) + 1 ||
         throw(ArgumentError("grid level N too small for total frequency $total"))
     return PadicModel(P, N, R, cum, total)
 end

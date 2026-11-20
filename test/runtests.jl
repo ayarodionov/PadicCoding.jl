@@ -57,6 +57,30 @@ end
     @test padic_decode_pr(m, padic_encode_pr(m, msg)) == msg
 end
 
+@testset "width bound: total <= P^(N-2) + 1" begin
+    # Allowed by the paper's bound 2 P^(N-2) - 1 = 7, but [2, 2, 2] leaves the
+    # interval [6, 12): width 6 < total 7, and EOM cannot be coded.
+    @test_throws ArgumentError PadicModel([2, 4]; P = 2, N = 4)
+    @test_throws ArgumentError PadicModel2([2, 4]; N = 4)
+    raw = PadicModel(2, 4, I128(16), [0, 2, 6, 7], 7)   # bypasses the check
+    @test_throws ErrorException padic_encode(raw, [2, 2, 2])
+
+    # At the limit itself every short message round-trips (exhaustive).
+    for P in 2:5, N in 3:4, k in 2:3
+        lim = P^(N - 2) + 1
+        for f in Iterators.product(fill(1:lim, k)...)
+            sum(f) + 1 == lim || continue
+            m = PadicModel(collect(f); P = P, N = N)
+            m2 = P == 2 ? PadicModel2(collect(f); N = N) : nothing
+            for len in 0:5, msg in Iterators.product(fill(1:k, len)...)
+                v = collect(Int, msg)
+                @test padic_decode(m, padic_encode(m, v)) == v
+                P == 2 && @test padic_decode2(m2, padic_encode2(m2, v)) == v
+            end
+        end
+    end
+end
+
 @testset "roundtrip PR+AR coder, P = 3 and P = 5" begin
     rng = MersenneTwister(3)
     for P in (3, 5)
