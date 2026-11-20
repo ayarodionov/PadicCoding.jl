@@ -81,6 +81,40 @@ end
     end
 end
 
+@testset "fixed length (no EOM) and fill" begin
+    rng = Xoshiro(11)
+    for P in (2, 3, 4, 5), trial in 1:40
+        k = rand(rng, 1:20)
+        f = rand(rng, (rand(rng, 1:9, k), [2^rand(rng, 0:12) for _ in 1:k]))
+        total = sum(f) + 1
+        N = 2
+        while P^(N - 2) + 1 < total; N += 1; end
+        N += rand(rng, 0:6)                       # tight and roomy grids
+        m = PadicModel(f; P = P, N = N)
+        msg = rand(rng, 1:k, rand(rng, 0:300))
+        n = length(msg)
+
+        fx = padic_encode_fixed(m, msg)
+        @test padic_decode_fixed(m, fx, n) == msg
+        @test all(d -> 0 <= d < P, fx)
+        @test padic_decode_fixed(m, vcat(fx, zeros(Int, 5)), n) == msg
+        @test length(fx) <= length(padic_encode(m, msg))
+
+        L = rand(rng, 1:60)
+        kk, d = padic_fill(m, msg, L)
+        @test length(d) <= L
+        @test d == padic_encode_fixed(m, msg[1:kk])
+        @test padic_decode_fixed(m, vcat(d, zeros(Int, L - length(d))), kk) == msg[1:kk]
+        kk < n && @test length(padic_encode_fixed(m, msg[1:kk+1])) > L
+        s = rand(rng, 1:n+1)                      # fill from an offset
+        ks, ds = padic_fill(m, msg, L; start = s)
+        @test padic_decode_fixed(m, ds, ks) == msg[s:s+ks-1]
+    end
+    m = PadicModel([1, 2]; P = 3, N = 4)
+    @test padic_decode_fixed(m, padic_encode_fixed(m, Int[]), 0) == Int[]
+    @test_throws ArgumentError padic_decode_fixed(m, [0], -1)
+end
+
 @testset "roundtrip PR+AR coder, P = 3 and P = 5" begin
     rng = MersenneTwister(3)
     for P in (3, 5)

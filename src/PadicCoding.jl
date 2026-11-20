@@ -25,6 +25,7 @@ module PadicCoding
 
 export PadicModel, eom,
     padic_encode, padic_decode,
+    padic_encode_fixed, padic_decode_fixed, padic_fill,
     padic_encode_pr, padic_decode_pr,
     PadicModel2, padic_encode2, padic_decode2
 
@@ -296,6 +297,79 @@ toleft(sp::Int, lh::I128, P::Int) = pdigit(lh, 0, P) >= sp
 # (the path {n, 0, ..., 0} is the p-adic number n).
 toright(sp::Int, rh::I128, P::Int) = pdigit(rh, 0, P) < sp || rh == sp
 
+# Encoder state.  The encoder is split into steps so that the EOM, fixed
+# length and fill variants share one implementation.
+mutable struct Encoder
+    l::I128
+    r::I128
+    sp::Int           # stable point of AR (level-1 grid point index, 0 < sp < P)
+    spn::Int          # number of times AR rescaling was applied
+    out::Vector{Int}
+end
+Encoder() = Encoder(zero(I128), zero(I128), 0, 0, Int[])
+
+# Flush a pending AR transformation once the interval leaves the stable
+# point: push the common path it determines and rescale by one digit.
+function flush_sp!(e::Encoder, m::PadicModel)
+    e.spn == 0 && return
+    P, N = m.P, m.N
+    lh = hat(e.l, P, N)
+    rh = hat(e.r, P, N)
+    if toleft(e.sp, lh, P)
+        push!(e.out, e.sp)
+        pushrep!(e.out, 0, e.spn)
+    elseif toright(e.sp, rh, P)
+        push!(e.out, e.sp - 1)
+        pushrep!(e.out, P - 1, e.spn)
+    else
+        return
+    end
+    e.l = rescale(e.l, 1, P, N)
+    e.r = rescale(e.r, 1, P, N)
+    e.sp = 0
+    e.spn = 0
+end
+
+# Code one symbol: narrow the interval, then PR and AR rescaling.
+function encode_step!(e::Encoder, m::PadicModel, a::Int)
+    P, N = m.P, m.N
+    e.l, e.r = mcode(m, a, e.l, e.r)
+    flush_sp!(e, m)
+    if e.spn == 0                                      # PR rescaling
+        lh = hat(e.l, P, N)
+        n = compath(lh, hat(mod(e.r - 1, m.R), P, N), P, N)
+        if n > 0
+            pushdigits!(e.out, lh, n, P)
+            e.l = rescale(e.l, n, P, N)
+            e.r = rescale(e.r, n, P, N)
+        end
+    end
+    while true                                         # AR rescaling
+        lh = hat(e.l, P, N)
+        rh = hat(e.r, P, N)
+        ar_predicate(lh, rh, P) || break
+        e.sp == 0 && (e.sp = pdigit(rh, 0, P))
+        e.spn += 1
+        e.l = hat(cut1(lh, P), P, N)                   # lift(cut(l^,1,1),1)^
+        e.r = hat(cut1(rh, P), P, N)
+    end
+end
+
+# Digits that terminate the code in the current state (optionally after
+# coding EOM): the shortest path into the final interval.  Does not change e.
+function encode_tail(e::Encoder, m::PadicModel; eom_symbol::Bool)
+    t = Encoder(e.l, e.r, e.sp, e.spn, Int[])
+    eom_symbol && ((t.l, t.r) = mcode(m, eom(m), t.l, t.r))
+    flush_sp!(t, m)
+    if t.spn == 0
+        q = select_path(t.l, t.r, m.P, m.N, m.R)
+        pushdigits!(t.out, q, ndigits(q, base = m.P), m.P)
+    else
+        push!(t.out, t.sp)  # we already have a point of level 1
+    end
+    return t.out
+end
+
 """
     padic_encode(m, msg) -> Vector{Int}
 
@@ -304,84 +378,71 @@ Revised p-adic encoder with PR and AR rescaling.  `msg` contains symbols
 stream of P-bits (0 .. P-1); for P = 2 these are plain bits.
 """
 function padic_encode(m::PadicModel, msg::AbstractVector{<:Integer})
-    P, N = m.P, m.N
-    out = Int[]
-    l = r = zero(I128)
-    sp = 0    # stable point of AR (level-1 grid point index, 0 < sp < P)
-    spn = 0   # number of times AR rescaling was applied
-
-    # Flush a pending AR transformation once the interval leaves the stable
-    # point: push the common path it determines and rescale by one digit.
-    function flush_sp!()
-        spn == 0 && return
-        lh = hat(l, P, N)
-        rh = hat(r, P, N)
-        if toleft(sp, lh, P)
-            push!(out, sp)
-            pushrep!(out, 0, spn)
-        elseif toright(sp, rh, P)
-            push!(out, sp - 1)
-            pushrep!(out, P - 1, spn)
-        else
-            return
-        end
-        l = rescale(l, 1, P, N)
-        r = rescale(r, 1, P, N)
-        sp = 0
-        spn = 0
-    end
-
+    e = Encoder()
     for a in msg
-        l, r = mcode(m, Int(a), l, r)
-        flush_sp!()
-        if spn == 0                                    # PR rescaling
-            lh = hat(l, P, N)
-            n = compath(lh, hat(mod(r - 1, m.R), P, N), P, N)
-            if n > 0
-                pushdigits!(out, lh, n, P)
-                l = rescale(l, n, P, N)
-                r = rescale(r, n, P, N)
-            end
-        end
-        while true                                     # AR rescaling
-            lh = hat(l, P, N)
-            rh = hat(r, P, N)
-            ar_predicate(lh, rh, P) || break
-            sp == 0 && (sp = pdigit(rh, 0, P))
-            spn += 1
-            l = hat(cut1(lh, P), P, N)                 # lift(cut(l^,1,1),1)^
-            r = hat(cut1(rh, P), P, N)
-        end
+        encode_step!(e, m, Int(a))
     end
-
-    l, r = mcode(m, eom(m), l, r)
-    flush_sp!()
-    if spn == 0
-        q = select_path(l, r, P, N, m.R)
-        pushdigits!(out, q, ndigits(q, base = P), P)
-    else
-        push!(out, sp)  # we already have a point of level 1
-    end
-    return out
+    return append!(e.out, encode_tail(e, m; eom_symbol = true))
 end
 
 """
-    padic_decode(m, bits) -> Vector{Int}
+    padic_encode_fixed(m, msg) -> Vector{Int}
 
-Decoder matching [`padic_encode`](@ref).
+Encoder for messages whose length is known to the decoder: the EOM symbol is
+not coded, which saves about `log_P(total)` digits per message.  Decode with
+[`padic_decode_fixed`](@ref) and the same length.  The model's EOM slot stays
+reserved, which costs only `log_P(total / (total - 1))` per symbol.
 """
-function padic_decode(m::PadicModel, bits::Vector{Int})
+function padic_encode_fixed(m::PadicModel, msg::AbstractVector{<:Integer})
+    e = Encoder()
+    for a in msg
+        encode_step!(e, m, Int(a))
+    end
+    return append!(e.out, encode_tail(e, m; eom_symbol = false))
+end
+
+"""
+    padic_fill(m, msg, L; start = 1) -> (k, digits)
+
+Fixed code length: code the longest prefix `msg[start : start+k-1]` whose
+fixed-length code ([`padic_encode_fixed`](@ref)) fits in `L` digits.  Symbols
+are added one at a time and the first one that does not fit stops the fill.
+`digits` has at most `L` entries; padding it with zeros to exactly `L` does not
+change the decoded message.  The decoder needs `k`:
+`padic_decode_fixed(m, digits, k)`.
+"""
+function padic_fill(m::PadicModel, msg::AbstractVector{<:Integer}, L::Integer;
+                    start::Integer = 1)
+    e = Encoder()
+    best = encode_tail(e, m; eom_symbol = false)
+    length(best) <= L || throw(ArgumentError("L = $L is too small for any code"))
+    k = 0
+    for i in start:length(msg)
+        encode_step!(e, m, Int(msg[i]))
+        length(e.out) > L && break
+        t = encode_tail(e, m; eom_symbol = false)
+        length(e.out) + length(t) > L && break
+        best = vcat(e.out, t)
+        k += 1
+    end
+    return k, best
+end
+
+# Decoder for both variants: n < 0 decodes until EOM, n >= 0 decodes n symbols.
+function decode_core(m::PadicModel, bits::Vector{Int}, n::Int)
     P, N = m.P, m.N
     io = BitReader(bits)
     out = Int[]
+    n == 0 && return out
     l = r = zero(I128)
     sp = 0
     spn = 0
     g = getpath!(io, N, P)
     while true
         l, r, a = mdecode(m, g, l, r)
-        a == eom(m) && break
+        a == eom(m) && n < 0 && break
         push!(out, a)
+        length(out) == n && break
 
         if spn != 0
             lh = hat(l, P, N)
@@ -397,12 +458,12 @@ function padic_decode(m::PadicModel, bits::Vector{Int})
         end
 
         if spn == 0                                    # PR rescaling
-            n = compath(hat(l, P, N), hat(mod(r - 1, m.R), P, N), P, N)
-            if n > 0
-                l = rescale(l, n, P, N)
-                r = rescale(r, n, P, N)
-                g = rescale(g, n, P, N)
-                g += getpath!(io, n, P)
+            n1 = compath(hat(l, P, N), hat(mod(r - 1, m.R), P, N), P, N)
+            if n1 > 0
+                l = rescale(l, n1, P, N)
+                r = rescale(r, n1, P, N)
+                g = rescale(g, n1, P, N)
+                g += getpath!(io, n1, P)
             end
         end
 
@@ -419,6 +480,24 @@ function padic_decode(m::PadicModel, bits::Vector{Int})
         end
     end
     return out
+end
+
+"""
+    padic_decode(m, bits) -> Vector{Int}
+
+Decoder matching [`padic_encode`](@ref).
+"""
+padic_decode(m::PadicModel, bits::Vector{Int}) = decode_core(m, bits, -1)
+
+"""
+    padic_decode_fixed(m, bits, n) -> Vector{Int}
+
+Decoder matching [`padic_encode_fixed`](@ref) and [`padic_fill`](@ref):
+decodes exactly `n` symbols.
+"""
+function padic_decode_fixed(m::PadicModel, bits::Vector{Int}, n::Integer)
+    n >= 0 || throw(ArgumentError("message length must be non-negative"))
+    return decode_core(m, bits, Int(n))
 end
 
 include("PadicCoding2.jl")
