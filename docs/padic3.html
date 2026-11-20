@@ -207,7 +207,7 @@ body { margin: 0; }
         lies in one subtree and its <code>n</code> path trits are final.</p>
       <p>The decoder holds the next 5 code trits as a grid point <code>g</code>. Each rescaling shifts digits out of the top of <code>g</code> and new code trits into its bottom, so <code>g</code> stays inside the interval and picks out each symbol.</p>
       <p>Unlike P = 2, there are two level-1 points, ⅓ and ⅔. AR rescaling remembers which one it stretched around (the stable point) and how many times.
-        The width stays above 2/P² − 1/Pᴺ, so the total frequency may be at most 2·3³ − 1 = 53.</p>
+        The width stays at least 1/P² + 1/Pᴺ, so the total frequency may be at most 3³ + 1 = 28.</p>
     </div>
   </section>
 </div>
@@ -366,7 +366,7 @@ function buildDecodeTrace(freqs, bits, P, N, maxSyms) {
 }
 /*END*/
 
-const CFG = { P: 3, N: 5, fmax: 53 };
+const CFG = { P: 3, N: 5, fmax: 28 };
 const PP = CFG.P, NB = CFG.N, RR = PP ** NB, SS = RR / PP;
 const DIG = PP === 2 ? 'bit' : 'trit';
 const SUB = PP === 2 ? '₂' : '₃';

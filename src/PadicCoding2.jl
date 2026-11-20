@@ -21,7 +21,8 @@ export PadicModel2, padic_encode2, padic_decode2
     PadicModel2(freqs; N)
 
 Static binary (P = 2) model over the alphabet `1 .. length(freqs)` with an
-appended EOM symbol of frequency 1, on the grid G(2^N).
+appended EOM symbol of frequency 1, on the grid G(2^N).  The total frequency
+must not exceed 2^(N-2) + 1 (see `PadicModel`).
 """
 struct PadicModel2
     N::Int
@@ -38,7 +39,7 @@ function PadicModel2(freqs::AbstractVector{<:Integer}; N::Int)
     2 <= N <= 62 || throw(ArgumentError("N must be in 2 .. 62"))
     cum = cumsum(vcat(UInt64(0), UInt64.(freqs), UInt64(1)))
     total = cum[end]
-    total <= (UInt64(1) << (N - 1)) - 1 ||
+    total <= (UInt64(1) << (N - 2)) + 1 ||
         throw(ArgumentError("grid level N too small for total frequency $total"))
     R = UInt64(1) << N
     return PadicModel2(N, R, R - 1, 64 - N, cum, total)

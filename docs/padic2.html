@@ -365,7 +365,7 @@ function buildDecodeTrace(freqs, bits, P, N, maxSyms) {
 }
 /*END*/
 
-const CFG = { P: 2, N: 8, fmax: 127 };
+const CFG = { P: 2, N: 8, fmax: 65 };
 const PP = CFG.P, NB = CFG.N, RR = PP ** NB, SS = RR / PP;
 const DIG = PP === 2 ? 'bit' : 'trit';
 const SUB = PP === 2 ? '₂' : '₃';

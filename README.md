@@ -21,7 +21,7 @@ two interval edges get a common prefix (their p-adic distance drops below 1),
 that prefix is pushed to the output and the interval is rescaled (*PR*
 rescaling). The revised algorithm adds *AR* rescaling, based on the ordinary
 Archimedean distance, for intervals straddling a level-1 grid point; together
-the two rescalings keep the interval width above `2/P^2 - 1/P^N`, so the coder
+the two rescalings keep the interval width at least `1/P^2 + 1/P^N`, so the coder
 works with fixed-precision integers on arbitrarily long messages. For `P = 2`
 the algorithm is an integer variant of classic arithmetic coding; for special
 models it reproduces Huffman and Golomb-Rice codes exactly.
@@ -61,6 +61,9 @@ next symbol. The pages are plain HTML with no build step, so they also work when
 | `demos/ipv6_split_demo.jl` | IPv6 compression with a dictionary prefix model + per-field coding |
 | `demos/kalman_demo.jl` | Numeric signal compression with Kalman-filter predictive models (adaptive coder) |
 | `demos/ternary_demo.jl` | Binary vs. ternary coding: arithmetic (P = 2, 3) and Huffman (D = 2, 3) rates, radix-economy cost |
+| `demos/dna_demo.jl` | DNA storage without homopolymers: P = 3 coder + rotating code vs. ternary Huffman (Goldman et al.) |
+| `demos/pam3_demo.jl` | PAM-3 link: P = 3 coder vs. P = 2 coder + bits-to-trits block codes |
+| `demos/composite_p_test.jl` | Stress test for composite `P` (4, 6, 10, 256, ...) and for the width bound |
 | `docs/padic2.html`, `docs/padic3.html` | Interactive encode / decode animations for `P = 2` and `P = 3` (served by GitHub Pages) |
 | `docs/img/*.gif` | Recorded runs of the animations, shown above |
 | `demos/cpp/padic2.hpp` | C++ port of `PadicCoding2` (bit-identical `P = 2` coder) |
@@ -118,6 +121,9 @@ julia --project demos/ipv6_demo.jl
 julia --project demos/ipv6_split_demo.jl
 julia --project demos/kalman_demo.jl
 julia --project demos/ternary_demo.jl
+julia --project demos/dna_demo.jl
+julia --project demos/pam3_demo.jl
+julia --project demos/composite_p_test.jl
 ```
 
 ## API
@@ -126,8 +132,9 @@ julia --project demos/ternary_demo.jl
 
 - `PadicModel(freqs; P = 2, N)` — static frequency model over the alphabet
   `1 .. length(freqs)`; appends an EOM symbol with frequency 1. The total
-  frequency must not exceed `2*P^(N-2) - 1` (the width guarantee of the
-  revised algorithm). Internally all indexes are `Int128`.
+  frequency must not exceed `P^(N-2) + 1` (the width guarantee of the
+  revised algorithm, see the implementation notes). Internally all indexes
+  are `Int128`.
 - `padic_encode(m, msg)` / `padic_decode(m, bits)` — revised algorithm with
   PR + AR rescaling (pseudocode on pp. 25–27 of the paper). This is the pair
   to use.
@@ -137,7 +144,8 @@ julia --project demos/ternary_demo.jl
 
 ### `PadicCoding2` (optimized, `P = 2` only)
 
-- `PadicModel2(freqs; N)` with `2 ≤ N ≤ 62`.
+- `PadicModel2(freqs; N)` with `2 ≤ N ≤ 62` and total frequency at most
+  `2^(N-2) + 1`.
 - `padic_encode2(m, msg) -> BitVector`, `padic_decode2(m, bits)`.
 - `padic_encode2(model_at, msg)`, `padic_decode2(model_at, bits)` — adaptive
   coding: symbol `t` uses the model `model_at(t, prefix)`, where `prefix` holds
@@ -236,6 +244,17 @@ g++ -O3 -std=c++17 demos/cpp/padic2_bench.cpp -o padic2_bench
   truncation the straddle eventually breaks and the PR-only coder survives
   with a small compression loss. It can still fail (`message interval too
   narrow`) for unlucky model/message combinations — the PR+AR coder cannot.
+- **Width bound, corrected:** the paper (p. 25) states that PR and AR keep the
+  interval at least `2/P^2 - 1/P^N` wide and so allows total frequency up to
+  `2*P^(N-2) - 1`. That is too optimistic. After PR rescaling the interval
+  straddles a level-1 point, and AR applies only when `l[1] == P-1` *and*
+  `r[1] == 0`. If either fails, one edge is at least `1/P^2` from the point,
+  so the interval is only guaranteed `1/P^2 + 1/P^N` wide, i.e.
+  `P^(N-2) + 1` grid cells, and that is the limit on the total frequency.
+  Example: `P = 2`, `N = 4`, frequencies `[2, 4]` (total 7 with EOM, allowed
+  by the old limit); the message `[2, 2, 2]` leaves the interval `[6, 12)`,
+  width 6 < 7, and EOM cannot be coded. `demos/composite_p_test.jl` shows
+  failures at the old limit for every `P` and none at the new one.
 - Both `padic_encode` and `padic_encode2` implement the same algorithm and
   their outputs are bit-for-bit identical; the test suite cross-decodes
   streams between the two implementations.
