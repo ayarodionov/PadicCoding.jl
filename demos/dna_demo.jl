@@ -15,6 +15,24 @@
 #   (c) the P = 2 coder with the plain 2-bits-per-base mapping (A,C,G,T), which
 #       is denser but has homopolymers.
 # Every path is decoded back from the DNA string and checked.
+#
+# An oligo (oligonucleotide) is a short single-stranded DNA molecule made by
+# chemical synthesis, base by base.  Errors and cost grow with length, so
+# synthesis gives reliable strands of only about 100-300 nt, and stored data is
+# split over many oligos.  They are made in parallel, kept as an unordered
+# pool, and read back by sequencing, so each oligo also carries an index (and
+# often redundancy).  Goldman et al. used 117-nt oligos: a 100-nt segment of
+# the coded stream plus index and parity; consecutive segments overlap by 75 nt,
+# so each base is stored four times and an oligo adds 25 nt of new data.
+#
+# The second part cuts the data into oligos with a fixed payload of L nt (the
+# data part, index and redundancy not counted), each coded on its own, and
+# counts how many oligos each code needs:
+#   (a) ternary Huffman: codewords until the next one does not fit; the rest
+#       is padded with a prefix of that codeword, so the decoder stops there;
+#   (b) P = 3 coder with EOM, the longest prefix that fits;
+#   (c) P = 3 fixed-length coder (padic_fill, no EOM) after a small header
+#       with the number of bytes in the oligo.
 
 using PadicCoding, Printf
 
@@ -152,7 +170,103 @@ function corpus()
     return out
 end
 
+# ---- oligos with a fixed payload of L nt -----------------------------------
+function huffman_oligos(code, msg, L)
+    oligos = Vector{Vector{Int}}()
+    i = 1
+    while i <= length(msg)
+        o = Int[]
+        while i <= length(msg) && length(o) + length(code[msg[i]]) <= L
+            append!(o, code[msg[i]]); i += 1
+        end
+        i <= length(msg) && append!(o, code[msg[i]][1:L-length(o)])  # incomplete codeword
+        push!(oligos, o)
+    end
+    return oligos
+end
+
+# Longest prefix of msg[i:end] whose code fits in L digits; enc(k) codes msg[i:i+k-1].
+function longest_fit(enc, L, nleft, guess)
+    k = clamp(guess, 0, nleft)
+    while k > 0 && length(enc(k)) > L; k -= 1; end
+    while k < nleft && length(enc(k + 1)) <= L; k += 1; end
+    return k
+end
+
+function eom_oligos(m, msg, L, avg)
+    oligos, counts, i = Vector{Vector{Int}}(), Int[], 1
+    while i <= length(msg)
+        enc(k) = padic_encode(m, msg[i:i+k-1])
+        k = longest_fit(enc, L, length(msg) - i + 1, floor(Int, L / avg) - 6)
+        k == 0 && error("L too small")
+        push!(oligos, enc(k)); push!(counts, k); i += k
+    end
+    return oligos, counts
+end
+
+# Header: h trits with k - kbase.  h and kbase are global parameters.
+function fill_oligos(m, msg, L, h)
+    oligos, counts, i = Vector{Vector{Int}}(), Int[], 1
+    while i <= length(msg)
+        k, d = padic_fill(m, msg, L - h; start = i)
+        k == 0 && error("L too small")
+        push!(oligos, d); push!(counts, k); i += k
+    end
+    return oligos, counts
+end
+
+function oligo_experiment(name, data::Vector{UInt8}, Ls)
+    msg = Int.(data) .+ 1
+    n = length(msg)
+    freqs = ones(Int, 256)
+    for s in msg; freqs[s] += 1; end
+    p = freqs ./ sum(freqs)
+    m = PadicModel(freqs; P = 3, N = 26)
+    code = huffman_code(p, 3)
+    avg = -sum(log(3, p[s]) for s in msg) / n          # trits per byte
+
+    @printf("\n%s: oligos with a fixed payload of L nt (whole file %d bytes)\n", name, n)
+    @printf("  %5s  %-34s %8s %10s %9s\n", "L", "method", "oligos", "bytes/oligo", "vs Huffman")
+    for L in Ls
+        rows = []
+
+        ho = huffman_oligos(code, msg, L)
+        @assert reduce(vcat, [huffman_decode(code, o) for o in ho]) == msg
+        push!(rows, ("ternary Huffman, padded", length(ho)))
+
+        eo, ec = eom_oligos(m, msg, L, avg)
+        @assert reduce(vcat, [padic_decode(m, o) for o in eo]) == msg
+        push!(rows, ("P=3 with EOM", length(eo)))
+
+        h = 0                                          # smallest header that fits
+        fo, fc = fill_oligos(m, msg, L, h)
+        while 3^h < maximum(fc) - minimum(fc) + 1
+            h += 1
+            fo, fc = fill_oligos(m, msg, L, h)
+        end
+        kbase = minimum(fc)
+        trits = [vcat(reverse(digits(k - kbase; base = 3, pad = h)),
+                      d, zeros(Int, L - h - length(d))) for (k, d) in zip(fc, fo)]
+        dec = Int[]
+        for t in trits
+            k = foldl((a, b) -> 3a + b, t[1:h]; init = 0) + kbase
+            append!(dec, padic_decode_fixed(m, t[h+1:end], k))
+            @assert dna_to_trits(trits_to_dna(t)) == t
+        end
+        @assert dec == msg
+        push!(rows, (@sprintf("P=3 fixed length + %d-trit header", h), length(fo)))
+
+        for (lbl, cnt) in rows
+            @printf("  %5d  %-34s %8d %10.2f %+8.2f%%\n", L, lbl, cnt, n / cnt,
+                    100 * (cnt / rows[1][2] - 1))
+        end
+    end
+end
+
 sources = isempty(ARGS) ? corpus() : [(f, read(f)) for f in ARGS]
 for (name, data) in sources
     experiment(name, data)
+end
+for (name, data) in sources
+    oligo_experiment(name, data, (100, 150, 200, 300))
 end

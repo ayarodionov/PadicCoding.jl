@@ -138,6 +138,16 @@ julia --project demos/composite_p_test.jl
 - `padic_encode(m, msg)` / `padic_decode(m, bits)` — revised algorithm with
   PR + AR rescaling (pseudocode on pp. 25–27 of the paper). This is the pair
   to use.
+- `padic_encode_fixed(m, msg)` / `padic_decode_fixed(m, bits, n)` — the same
+  coder for messages whose length `n` the decoder knows: no EOM symbol is
+  coded, which saves about `log_P(total)` digits per message (about 11 trits
+  for a byte model built from 150 KB of text). Useful for many short blocks.
+- `padic_fill(m, msg, L; start = 1) -> (k, digits)` — fixed code length: codes
+  the longest prefix `msg[start : start+k-1]` that fits in `L` digits (for
+  example one DNA oligo, a short synthetic DNA strand of about 100–300
+  nucleotides, or one link frame); padding `digits` with zeros to `L`
+  does not change the result. Decode with `padic_decode_fixed(m, digits, k)`,
+  so `k` must be sent too, e.g. in a small header.
 - `padic_encode_pr(m, msg)` / `padic_decode_pr(m, bits)` — basic algorithm
   with PR rescaling only (pp. 17–19), kept for study and comparison.
 - `eom(m)` — index of the EOM symbol.
@@ -198,6 +208,158 @@ Huffman code is better only in the base that matches the probabilities. The
 number of states, storing information costs `b / ln b` per nat, which is
 smallest at `b = e`. Ternary is 5.36% cheaper than binary in that model (the
 last column, digits × radix), but the compressed output is no smaller.
+
+## DNA storage demo
+
+DNA synthesis and sequencing make many errors on homopolymers (runs of the
+same base). Goldman et al. (*Nature* 494, 2013) avoid them completely with a
+*rotating code*: data is written as trits, and each trit selects one of the 3
+bases that differ from the previous base. The channel is then exactly
+ternary, `log2 3 = 1.585` bits per nucleotide (nt). They produce the trits
+with a ternary Huffman code over bytes. `demos/dna_demo.jl` uses the same
+static byte model for three paths and decodes each one back from the DNA
+string:
+
+| Path (150 KB of `/usr/share/dict/words`) | nt | nt/byte | vs. P = 3 | longest run | runs ≥ 4 |
+|---|---|---|---|---|---|
+| floor: entropy / log2 3 | 393 043 | 2.6203 | | | |
+| ternary Huffman + rotating code (Goldman) | 402 700 | 2.6847 | +2.45% | 1 | 0 |
+| **P = 3 coder + rotating code** | **393 055** | **2.6204** | 0 | 1 | 0 |
+| P = 2 coder, 2 bits per base | 311 488 | 2.0766 | −20.75% | 10 | 3 712 |
+
+- The P = 3 coder writes trits directly and ends 12 nt above the floor. The
+  Huffman code spends a whole number of trits on each byte and loses 2.45%
+  here (1.6% on the project's own text and source).
+- Writing 2 bits per base is 21% denser, but it gives thousands of runs of 4
+  or more equal bases. The rotating code never repeats a base.
+
+### Short oligos
+
+In a real system the stream is cut into short *oligos* (oligonucleotides):
+single-stranded DNA molecules made by chemical synthesis, base by base.
+Errors and cost grow with length, so synthesis gives reliable strands of only
+about 100–300 nt. The oligos are made in parallel, kept as an unordered pool
+and read back by sequencing, so each one also carries an index and often
+redundancy. Goldman et al. used 117-nt oligos: a 100-nt segment of the coded
+stream plus index and parity, with consecutive segments overlapping by 75 nt
+(each base stored four times).
+
+An arithmetic code makes one substitution corrupt the rest of its block, so
+each oligo is coded on its own. With `padic_encode`, every oligo pays for its
+EOM symbol (frequency 1 of about 150 000, so `log3 150000 ≈ 11` trits). The
+fixed-length coder (`padic_fill`) drops the EOM symbol and instead stores the
+number of bytes in a 3–5-trit header. The demo fills oligos with a payload of
+`L` nt (index and redundancy not counted) and counts how many each code needs:
+
+| L (nt) | ternary Huffman, padded | P = 3 with EOM | P = 3 fixed length + header |
+|---|---|---|---|
+| 100 | 4 066 | 4 434 (+9.05%) | 4 073 (+0.17%) |
+| 150 | 2 702 | 2 836 (+4.96%) | 2 683 (**−0.70%**) |
+| 200 | 2 024 | 2 083 (+2.92%) | 2 011 (**−0.64%**) |
+| 300 | 1 347 | 1 362 (+1.11%) | 1 335 (**−0.89%**) |
+
+(150 KB of `/usr/share/dict/words`; the Huffman oligos are padded with a
+prefix of the next codeword, so the decoder stops there without a header.)
+
+- Fixed length removes the EOM penalty, which was the whole problem with
+  short oligos.
+- Against Huffman the result is only about even. The arithmetic coder's
+  1.6–2.5% advantage on long streams is mostly used up by the header and the
+  1–2 termination trits per oligo: it wins by less than 1% from 150 nt up on
+  this text, and loses 0.07–2% on the project's own text and source.
+
+## PAM-3 demo
+
+A PAM-3 link sends one of 3 voltage levels per symbol, at most
+`log2 3 = 1.585` bits. Binary data is converted to symbols with small block
+codes. `demos/pam3_demo.jl` converts the output of the P = 2 coder with
+several block codes and with one whole-message base conversion, and compares
+it with the P = 3 coder, which writes symbols directly. Every path is decoded
+and checked:
+
+| Path (150 KB of `/usr/share/dict/words`) | symbols | vs. P = 3 |
+|---|---|---|
+| raw bytes, 3 bits → 2 symbols (no compression) | 800 000 | +103.5% |
+| P = 2 coder, 3 bits → 2 symbols (94.6% efficient) | 415 318 | +5.66% |
+| P = 2 coder, 11 bits → 7 symbols (99.1%) | 396 445 | +0.86% |
+| P = 2 coder, 19 bits → 12 symbols (99.9%) | 393 468 | +0.11% |
+| P = 2 coder, whole message converted to base 3 | 393 055 | 0.00% |
+| **P = 3 coder, direct** | **393 055** | 0 |
+
+The floor is 393 043 symbols; the project's own text gives the same
+percentages.
+
+- Against 3 bits → 2 symbols, the P = 3 coder saves the expected 5.7%
+  (`1 − 1.5 / log2 3`).
+- Larger block codes recover almost all of it: 19 bits → 12 symbols is only
+  0.11% behind. Converting the whole message as one big integer matches the
+  P = 3 coder exactly, but it needs the whole message first and big-integer
+  arithmetic.
+- So the P = 3 coder is not better at compression here. Its advantage is that
+  it needs no separate conversion stage: it is a streaming, fixed-precision
+  coder that already speaks the channel's alphabet.
+
+### Fixed frames
+
+Links send fixed frames, so the demo also uses the fixed-length coder. For
+incompressible data (what links usually carry), the P = 3 coder with a
+uniform model over bits works as a base converter of any size. The table
+gives the bits that always fit in a frame of `F` symbols:
+
+| F | 3 bits → 2 symbols | 11 → 7 (+ 3 → 2 for the rest) | P = 3 coder | `floor(F log2 3)` |
+|---|---|---|---|---|
+| 7 | 9 | 11 | 11 | 11 |
+| 112 | 168 | 176 | 177 | 177 |
+| 161 | 240 | 253 | 255 | 255 |
+| 1000 | 1500 | 1571 | 1584 | 1584 |
+
+For `F ≤ 7` all inputs are checked; for larger frames the coder's numbers
+come from 2000 random inputs plus constant and alternating ones, so they are
+not a guarantee. For compressible text in frames, with a byte-count header in
+each frame, the P = 3 coder fits 0.7–1.0% more bytes than the P = 2 coder
+followed by 11 → 7, and about 5% more than with 3 → 2.
+
+So on a link the fixed-length coder gains at most about 1% over an 11 → 7
+code, and it costs error resilience: one wrong symbol corrupts the rest of the
+frame, where 11 → 7 confines the damage to 11 bits. It also needs arithmetic
+for every symbol, where a block code is a small lookup table.
+
+## Composite P
+
+The paper takes `P` prime, but the coder only uses base-`P` digits: `hat`
+reverses them and `ordp(x - y, P)` counts the trailing digits two indexes
+share, which is meaningful for any base `P ≥ 2`. `demos/composite_p_test.jl`
+runs 600 random trials for each of 19 values of `P` (2, 3, 4, 5, 6, 7, 8, 9,
+10, 12, 16, 27, 30, 64, 100, 210, 256, 1000, 65536), with grid levels that
+force hundreds of thousands of AR rescalings:
+
+- every message round-trips for every `P`, prime or not, at the corrected
+  width bound (and fails for 0–14% of trials at the paper's bound, for prime
+  and composite `P` alike);
+- the rate is the same for every `P` (5.1404–5.1407 bits/byte on this README);
+- a larger `P` is faster, since each output digit carries more bits: in the
+  generic coder (the test's timing run) P = 256 encodes about 15 times faster
+  than P = 2. A byte-wise
+  range coder is in effect the case `P = 256`;
+- `P = 4` is not just `P = 2` with paired bits: rescaling happens at
+  different points, and the streams agree for only 40–64% of messages.
+
+## Is P ≠ 2 worth it?
+
+For compression ratio, no. Information does not depend on the base, and
+every gain measured above is against a weak baseline (3 → 2 packing, Huffman
+on long streams). Against a good binary-to-ternary conversion the gain is
+below 1%, and in realistic settings (short oligos, link frames with error
+handling) about zero. `P ≠ 2` does buy:
+
+1. convenience when the medium is natively `P`-ary (DNA with the rotating
+   code, PAM-3): one streaming, fixed-precision coder, no conversion stage;
+2. speed, from fewer output steps for large `P`;
+3. a unified view: the algorithm works for any base, which ties p-adic
+   coding to ordinary range coding.
+
+The most useful result of these experiments was the corrected width bound,
+which applies to every `P`, including `P = 2`.
 
 ## Performance
 
