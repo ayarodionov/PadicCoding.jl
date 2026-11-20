@@ -115,6 +115,21 @@ end
     @test_throws ArgumentError padic_decode_fixed(m, [0], -1)
 end
 
+@testset "composite P and model checks" begin
+    rng = Xoshiro(5)
+    for P in (4, 6, 10, 12, 256), _ in 1:10
+        m = PadicModel([5, 3, 2, 1, 1] .* 10; P = P, N = 12)
+        msg = rand(rng, 1:5, rand(rng, 0:200))
+        bits = padic_encode(m, msg)
+        @test all(b -> 0 <= b < P, bits)
+        @test padic_decode(m, bits) == msg
+        @test padic_decode_fixed(m, padic_encode_fixed(m, msg), length(msg)) == msg
+    end
+    @test_throws ArgumentError PadicModel([1, 2]; P = 1, N = 10)
+    @test_throws ArgumentError PadicModel([1, 2]; P = 0, N = 10)
+    @test_throws ArgumentError PadicModel([1, 2]; P = 256, N = 16)   # 2^128 overflows
+end
+
 @testset "roundtrip PR+AR coder, P = 3 and P = 5" begin
     rng = MersenneTwister(3)
     for P in (3, 5)

@@ -13,7 +13,8 @@ A Julia package implementing the compression algorithm from
 
 The coder is a generalization of integer arithmetic coding. A message is
 mapped to a semi interval of `[0, 1)` whose edges lie on an equidistant grid
-`G(P^N)` (`P` prime); edge points are kept as integer indexes in the ring
+`G(P^N)` (the paper takes `P` prime; the coder works for any base `P ≥ 2`,
+see [Composite P](#composite-p)); edge points are kept as integer indexes in the ring
 mod `P^N`. The *IP* transformation (operator `^` of the paper) maps a grid
 index to the p-adic integer number of the path leading to it on the coding
 P-tree — it simply reverses the `N` base-P digits. Whenever the paths to the
@@ -51,7 +52,7 @@ next symbol. The pages are plain HTML with no build step, so they also work when
 
 | File | Contents |
 |---|---|
-| `src/PadicCoding.jl` | Reference implementation for any prime `P`: module `PadicCoding` |
+| `src/PadicCoding.jl` | Reference implementation for any base `P ≥ 2`: module `PadicCoding` |
 | `src/PadicCoding2.jl` | Optimized `P = 2` specialization: submodule `PadicCoding2` |
 | `test/runtests.jl` | Test suite (paper examples, roundtrips, cross-checks) |
 | `demos/benchmark.jl` | Throughput benchmark of all coders |
@@ -128,13 +129,14 @@ julia --project demos/composite_p_test.jl
 
 ## API
 
-### `PadicCoding` (any prime `P`)
+### `PadicCoding` (any `P ≥ 2`)
 
 - `PadicModel(freqs; P = 2, N)` — static frequency model over the alphabet
-  `1 .. length(freqs)`; appends an EOM symbol with frequency 1. The total
-  frequency must not exceed `P^(N-2) + 1` (the width guarantee of the
-  revised algorithm, see the implementation notes). Internally all indexes
-  are `Int128`.
+  `1 .. length(freqs)`; appends an EOM symbol with frequency 1. `P` may be
+  any integer `≥ 2`, prime or not. The total frequency must not exceed
+  `P^(N-2) + 1` (the width guarantee of the revised algorithm, see the
+  implementation notes). Internally all indexes are `Int128`, so
+  `P^N * total` must stay below `2^126`.
 - `padic_encode(m, msg)` / `padic_decode(m, bits)` — revised algorithm with
   PR + AR rescaling (pseudocode on pp. 25–27 of the paper). This is the pair
   to use.

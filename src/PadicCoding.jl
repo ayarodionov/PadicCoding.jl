@@ -89,8 +89,10 @@ rescale(x::I128, n::Int, P::Int, N::Int) =
 
 Static model over the alphabet `1 .. length(freqs)` with the given positive
 symbol frequencies; a special EOM symbol (index `length(freqs) + 1`) with
-frequency 1 is appended.  `P` must be a prime, `N` is the grid level: all
-interval edges are indexes of the grid G(P^N).
+frequency 1 is appended.  `P >= 2` is the base of the output digits and `N`
+is the grid level: all interval edges are indexes of the grid G(P^N).  The
+paper takes `P` prime, but the coder only uses base-P digits, so any `P >= 2`
+works (see `demos/composite_p_test.jl`).  `P^N * total` must fit in `Int128`.
 
 The revised (PR + AR) algorithm keeps the current interval at least
 P^(N-2) + 1 grid cells wide (1/P^2 + 1/P^N of [0, 1)), so the total frequency
@@ -107,10 +109,13 @@ struct PadicModel
 end
 
 function PadicModel(freqs::AbstractVector{<:Integer}; P::Int = 2, N::Int)
+    P >= 2 || throw(ArgumentError("P must be at least 2"))
     isempty(freqs) && throw(ArgumentError("alphabet must not be empty"))
     all(>(0), freqs) || throw(ArgumentError("frequencies must be positive"))
     cum = cumsum(vcat(0, Vector{Int}(freqs), 1))  # EOM gets weight 1
     total = cum[end]
+    big(P)^N * total < big(2)^126 ||
+        throw(ArgumentError("P^N * total frequency does not fit in Int128"))
     R = I128(P)^N
     total <= R ÷ (I128(P) * P) + 1 ||
         throw(ArgumentError("grid level N too small for total frequency $total"))
