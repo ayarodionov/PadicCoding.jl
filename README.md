@@ -391,6 +391,42 @@ bits. It works when the final interval of the `n` levels holds only one
   symbol corrupts the rest of the frame, and the frame adds latency. The
   checks above `k = 14` are sampled, not proven.
 
+### Energy shaping
+
+The demo can also bias the model toward cheap transitions. With a simple
+energy model, a transition `p → q` costs `(q − p)^2` (switching energy grows
+with the square of the voltage step; an optional static per-level term is off
+by default). Weighting the transitions by `2^(−μ E)` gives, for each `μ`, the
+Markov chain with the most bits per symbol for its mean energy. The baselines
+are block codes that send `k` bits in 4 symbols using, for each previous
+level, the `2^k` lowest-energy codewords:
+
+| code | bits/symbol | energy/bit |
+|---|---|---|
+| plain PAM-4, full swings allowed | 2.000 | 1.246 |
+| block 7b4s, low-energy codebooks | 1.750 | 0.721 |
+| block 6b4s, low-energy codebooks | 1.500 | 0.527 |
+| block 5b4s, low-energy codebooks | 1.250 | 0.408 |
+| p-adic, one stream, μ = 0.25 | 1.790 | 0.651 |
+| p-adic, one stream, μ = 0.5 | 1.681 | 0.516 |
+| p-adic, one stream, μ = 1 | 1.457 | 0.382 |
+| p-adic, fixed 128-symbol frames, μ = 0.25 | 1.500 | 0.767 |
+| p-adic, fixed 128-symbol frames, μ = 1 | 0.906 | 0.617 |
+
+- As one continuous stream, the shaped matcher reaches the theoretical
+  trade-off (e.g. 1.7896 bits/symbol vs. 1.7868 in theory at μ = 0.25) and
+  beats the low-energy block codes on both counts: more bits per symbol *and*
+  less energy per bit (1.79 vs. 1.75 bits/symbol at 0.651 vs. 0.721 per bit).
+  But the number of bits per frame then varies, so the input must be
+  buffered.
+- With a fixed number of bits per frame, which a link needs, it is *worse*
+  than the block codes. Every input must fit, so the rate is set by the most
+  probable frame (for example one that stays on a single level), not by the
+  average.
+- So energy shaping with this coder suits a buffered, variable-rate setting.
+  For fixed-rate links, low-energy block codes (possibly generated from the
+  same model) are the better choice.
+
 Here, unlike plain compression, the coder brings something a fixed base
 cannot: the Markov model handles a constraint whose number of choices changes
 from symbol to symbol. `P` itself does not matter (`P = 2` is used).

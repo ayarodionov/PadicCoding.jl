@@ -20,6 +20,16 @@
 #     *encoder* recovers the bits.  This works when the final interval of the
 #     n levels contains only one k-bit point, which is checked for every input
 #     (all inputs for k <= 14, sampled above).
+#
+# The last part is energy shaping.  A transition p -> q costs
+# E = ALPHA (q - p)^2 + BETA (3 - q): switching energy grows with the square
+# of the voltage step, and the optional static term models a termination that
+# draws more current at lower levels (BETA = 0 by default).  This is a simple
+# model, not measured hardware.  Weighting the transitions by 2^(-mu E) gives,
+# for each mu, the Markov chain with the most bits per symbol for its mean
+# energy; the matcher uses it as its model.  It is compared with block codes
+# that send k bits in 4 symbols using, for each previous level, the 2^k
+# lowest-energy codewords.
 
 using PadicCoding, Random, Printf, LinearAlgebra
 
@@ -59,14 +69,20 @@ const MODELS = [PadicModel(max.(1, round.(Int, SCALE .* maxent(p))); P = 2, N = 
                            eom = false) for p in LEVELS]
 
 # Per-step model: the state is the previous level, found from p0 and the
-# symbols so far (indexes into allowed(previous level)).
-function model_fn(p0)
+# symbols so far (indexes into allowed(previous level)).  The coder calls it
+# once per symbol in order, so the level is updated one step at a time.
+function model_fn(p0, models = MODELS)
+    t0, p = 0, p0                    # p = level after the first t0 symbols
     return (t, prefix) -> begin
-        p = p0
-        for a in prefix
-            p = allowed(p)[a]
+        if t - 1 == t0 + 1
+            p = allowed(p)[prefix[end]]; t0 += 1
+        elseif t - 1 != t0
+            t0, p = 0, p0
+            for a in prefix
+                p = allowed(p)[a]; t0 += 1
+            end
         end
-        MODELS[p+1]
+        models[p+1]
     end
 end
 
@@ -81,9 +97,9 @@ end
 trim(v) = v[1:something(findlast(!=(0), v), 0)]
 
 # Send k bits u as n levels after previous level p0; true if they come back.
-function roundtrip(u, n, p0)
-    idx = padic_decode_fixed(model_fn(p0), u, n)
-    back = trim(padic_encode_fixed(model_fn(p0), idx))
+function roundtrip(u, n, p0, models = MODELS)
+    idx = padic_decode_fixed(model_fn(p0, models), u, n)
+    back = trim(padic_encode_fixed(model_fn(p0, models), idx))
     return length(back) <= length(u) && back == trim(u)
 end
 
@@ -93,11 +109,11 @@ function inputs(k, rng)
                  [zeros(Int, k), ones(Int, k), [isodd(i) ? 1 : 0 for i in 1:k]]), "sampled")
 end
 
-function matcher_bits(n, rng)
-    k = block_bits_state(n)                               # nothing can do better
+function matcher_bits(n, rng; models = MODELS, kstart = block_bits_state(n))
+    k = min(kstart, block_bits_state(n))                  # nothing can do better
     while k > 0
         us, how = inputs(k, rng)
-        all(roundtrip(u, n, p0) for u in us for p0 in LEVELS) && return k, how
+        all(roundtrip(u, n, p0, models) for u in us for p0 in LEVELS) && return k, how
         k -= 1
     end
     return 0, "-"
@@ -141,3 +157,146 @@ gray = [(0, 1, 3, 2)[2bits[i] + bits[i+1] + 1] for i in 1:2:length(bits)]
         length(levels), swings(levels))
 @printf("\n  plain PAM-4 (2 bits/symbol, Gray) %d symbols, %d full swings\n",
         length(gray), swings(gray))
+
+# ---- energy shaping -------------------------------------------------------------
+const ALPHA = 1.0               # switching energy per (level step)^2
+const BETA = 0.0                # static energy per level below the top one
+energy(p, q) = ALPHA * (q - p)^2 + BETA * (3 - q)
+
+# The maxentropic chain for weights B[p, q] = 2^(-mu E): P(q | p) = B v_q / (lambda v_p).
+function shaped_chain(mu)
+    B = [abs(p - q) != 3 ? 2.0^(-mu * energy(p, q)) : 0.0 for p in LEVELS, q in LEVELS]
+    F = eigen(B)
+    i = argmax(real.(F.values))
+    lam, v = real(F.values[i]), abs.(real.(F.vectors[:, i]))
+    T = [B[p+1, q+1] * v[q+1] / (lam * v[p+1]) for p in LEVELS, q in LEVELS]
+    G = eigen(Matrix(T'))                                 # stationary distribution
+    pi = abs.(real.(G.vectors[:, argmax(real.(G.values))])); pi ./= sum(pi)
+    H = -sum(pi[p+1] * T[p+1, q+1] * log2(T[p+1, q+1]) for p in LEVELS, q in LEVELS
+             if T[p+1, q+1] > 0)
+    E = sum(pi[p+1] * T[p+1, q+1] * energy(p, q) for p in LEVELS, q in LEVELS)
+    return T, H, E
+end
+
+shaped_models(T) = [PadicModel(max.(1, round.(Int, SCALE .* [T[p+1, q+1] for q in allowed(p)]));
+                               P = 2, N = 40, eom = false) for p in LEVELS]
+
+seq_energy(p0, lv) = sum(energy(i == 1 ? p0 : lv[i-1], lv[i]) for i in eachindex(lv))
+
+# Largest k (bits per frame) that every tested input round-trips with; binary
+# search, assuming that a k that works also works for smaller k.
+function fixed_bits(n, models, kmax, rng)
+    lo, hi = 0, kmax                       # lo works, hi + 1 is not tested
+    while lo < hi
+        mid = (lo + hi + 1) ÷ 2
+        us, _ = inputs(mid, rng)
+        if all(roundtrip(u, n, p0, models) for u in us for p0 in LEVELS)
+            lo = mid
+        else
+            hi = mid - 1
+        end
+    end
+    return lo
+end
+
+# Fixed rate: frames of n symbols, k bits each, state carried across frames.
+function matcher_stream(models, n, k, frames, rng)
+    E, p0 = 0.0, 1
+    for _ in 1:frames
+        u = rand(rng, 0:1, k)
+        idx = padic_decode_fixed(model_fn(p0, models), u, n)
+        @assert trim(padic_encode_fixed(model_fn(p0, models), idx)) == trim(u)
+        lv = to_levels(p0, idx)
+        E += seq_energy(p0, lv)
+        p0 = lv[end]
+    end
+    return k / n, E / (frames * n), E / (frames * k)
+end
+
+# Digits the encoder has committed after coding idx (no termination): every
+# point of the final interval starts with them.
+function committed(model_at, idx)
+    e = PadicCoding.Encoder()
+    for t in eachindex(idx)
+        PadicCoding.encode_step!(e, model_at(t, view(idx, 1:t-1)), idx[t])
+    end
+    return e.out
+end
+
+# Variable rate: one continuous stream.  The decoder turns all input bits into
+# levels; the receiver's encoder commits digits as levels arrive, and the
+# stream needs the first S levels after which it has committed every input bit.
+function variable_stream(models, H, nbits, rng)    # H: bits per level of the chain
+    bits = rand(rng, 0:1, nbits + 256)   # more data follows the measured part
+    S = ceil(Int, 1.1 * nbits / H) + 200
+    idx = padic_decode_fixed(model_fn(1, models), bits, S)
+    at = model_fn(1, models)
+    e = PadicCoding.Encoder()
+    used = 0
+    for t in 1:S
+        PadicCoding.encode_step!(e, at(t, view(idx, 1:t-1)), idx[t])
+        length(e.out) >= nbits && (used = t; break)
+    end
+    used == 0 && error("not enough levels")
+    @assert e.out[1:nbits] == bits[1:nbits]
+    lv = to_levels(1, idx[1:used])
+    E = seq_energy(1, lv)
+    return nbits / used, E / used, E / nbits
+end
+
+# Block code: k bits -> 4 symbols, the 2^k lowest-energy valid codewords per
+# previous level.
+function block_codebooks(k)
+    books = Vector{Vector{Vector{Int}}}()
+    for p in LEVELS
+        words = Vector{Vector{Int}}()
+        for x in 0:255
+            w = digits(x; base = 4, pad = 4)
+            all(abs(w[i] - (i == 1 ? p : w[i-1])) != 3 for i in 1:4) && push!(words, w)
+        end
+        sort!(words; by = w -> (seq_energy(p, w), w))
+        length(words) >= 2^k || error("$k bits do not fit")
+        push!(books, words[1:2^k])
+    end
+    return books
+end
+
+function block_stream(k, frames, rng)
+    books = block_codebooks(k)
+    E, p0 = 0.0, 1
+    for _ in 1:frames
+        w = books[p0+1][rand(rng, 1:2^k)]
+        E += seq_energy(p0, w)
+        p0 = w[end]
+    end
+    return k / 4, E / (4frames), E / (k * frames)
+end
+
+function energy_report(rng)
+    println("\n==== Energy shaping: E(p -> q) = $(ALPHA) (q - p)^2 + $(BETA) (3 - q) ====")
+    gray = rand(rng, 0:3, 100_000)
+    Eg = seq_energy(1, gray)
+    @printf("  plain PAM-4 (full swings allowed): 2.0000 bits/symbol, E/symbol %.3f, E/bit %.3f\n",
+            Eg / length(gray), Eg / (2length(gray)))
+    n = 128
+    @printf("\n  %-34s %9s %9s %8s   %s\n", "code", "bits/sym", "E/symbol", "E/bit",
+            "theory (n -> inf): bits/sym, E/bit")
+    for k in (7, 6, 5)
+        @printf("  %-34s %9.4f %9.3f %8.3f\n", "block $(k)b4s, low-energy codebooks",
+                block_stream(k, 50_000, rng)...)
+    end
+    for mu in (0.0, 0.25, 0.5, 1.0, 2.0)
+        T, H, E = shaped_chain(mu)
+        models = shaped_models(T)
+        k = fixed_bits(n, models, floor(Int, n * H) + 2, rng)
+        @printf("  %-34s %9.4f %9.3f %8.3f   %.4f, %.3f\n",
+                "p-adic fixed, mu = $(mu), n = $n", matcher_stream(models, n, k, 500, rng)..., H, E / H)
+        @printf("  %-34s %9.4f %9.3f %8.3f\n",
+                "p-adic variable (one stream)", variable_stream(models, H, 60_000, rng)...)
+    end
+    println("\nfixed: the same k bits in every frame (what a link needs; k from sampled",
+            "\ninputs above 14 bits).  variable: one continuous stream, as many bits per",
+            "\nlevel as the chain carries on average, so the input must be buffered.")
+end
+
+energy_report(rng)
