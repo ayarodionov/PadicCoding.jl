@@ -64,6 +64,7 @@ next symbol. The pages are plain HTML with no build step, so they also work when
 | `demos/ternary_demo.jl` | Binary vs. ternary coding: arithmetic (P = 2, 3) and Huffman (D = 2, 3) rates, radix-economy cost |
 | `demos/dna_demo.jl` | DNA storage without homopolymers: P = 3 coder + rotating code vs. ternary Huffman (Goldman et al.) |
 | `demos/pam3_demo.jl` | PAM-3 link: P = 3 coder vs. P = 2 coder + bits-to-trits block codes |
+| `demos/pam4_mta_demo.jl` | PAM-4 without 0 ↔ 3 transitions: the p-adic decoder as a constrained-sequence encoder vs. block codes |
 | `demos/composite_p_test.jl` | Stress test for composite `P` (4, 6, 10, 256, ...) and for the width bound |
 | `docs/padic2.html`, `docs/padic3.html` | Interactive encode / decode animations for `P = 2` and `P = 3` (served by GitHub Pages) |
 | `docs/img/*.gif` | Recorded runs of the animations, shown above |
@@ -125,14 +126,16 @@ julia --project demos/ternary_demo.jl
 julia --project demos/dna_demo.jl
 julia --project demos/pam3_demo.jl
 julia --project demos/composite_p_test.jl
+julia --project demos/pam4_mta_demo.jl
 ```
 
 ## API
 
 ### `PadicCoding` (any `P ≥ 2`)
 
-- `PadicModel(freqs; P = 2, N)` — static frequency model over the alphabet
-  `1 .. length(freqs)`; appends an EOM symbol with frequency 1. `P` may be
+- `PadicModel(freqs; P = 2, N, eom = true)` — static frequency model over the
+  alphabet `1 .. length(freqs)`; appends an EOM symbol with frequency 1
+  (`eom = false`: no EOM symbol, for the fixed-length functions only). `P` may be
   any integer `≥ 2`, prime or not. The total frequency must not exceed
   `P^(N-2) + 1` (the width guarantee of the revised algorithm, see the
   implementation notes). Internally all indexes are `Int128`, so
@@ -144,6 +147,9 @@ julia --project demos/composite_p_test.jl
   coder for messages whose length `n` the decoder knows: no EOM symbol is
   coded, which saves about `log_P(total)` digits per message (about 11 trits
   for a byte model built from 150 KB of text). Useful for many short blocks.
+- `padic_encode_fixed(model_at, msg)` / `padic_decode_fixed(model_at, bits, n)`
+  — per-step models: symbol `t` uses `model_at(t, prefix)`, called once per
+  symbol in order; all models must share `P` and `N`.
 - `padic_fill(m, msg, L; start = 1) -> (k, digits)` — fixed code length: codes
   the longest prefix `msg[start : start+k-1]` that fits in `L` digits (for
   example one DNA oligo, a short synthetic DNA strand of about 100–300
@@ -345,6 +351,85 @@ force hundreds of thousands of AR rescalings:
   range coder is in effect the case `P = 256`;
 - `P = 4` is not just `P = 2` with paired bits: rescaling happens at
   different points, and the streams agree for only 40–64% of messages.
+
+## PAM-4 without full swings
+
+A PAM-4 symbol carries 2 bits, but jumps between the outer levels (0 ↔ 3) cause
+crosstalk and power noise, so GDDR6X uses MTA ("maximum transition
+avoidance") coding to forbid them. That makes PAM-4 a constrained channel,
+like DNA without homopolymers, except that the number of choices is not fixed:
+3 after level 0 or 3, 4 after level 1 or 2. So no single base `P` fits. The
+capacity is `log2((3 + √17)/2) = 1.8325` bits per symbol.
+
+`demos/pam4_mta_demo.jl` runs the p-adic coder backwards, as a
+*distribution matcher*: `padic_decode_fixed` with per-step models (one per
+previous level, maxentropic probabilities, legal transitions only, no EOM)
+turns `k` input bits into `n` levels, and `padic_encode_fixed` recovers the
+bits. It works when the final interval of the `n` levels holds only one
+`k`-bit point; the demo checks that for every input (all inputs up to
+`k = 14`, sampled above). Bits per frame of `n` symbols:
+
+| n | block code valid after any level | block code per previous level (best possible) | p-adic matcher | bits/symbol | vs. 7 bits / 4 symbols |
+|---|---|---|---|---|---|
+| 4 | 6 | 7 | 7 | 1.750 | 0 |
+| 8 | 13 | 14 | 14 | 1.750 | 0 |
+| 16 | 28 | 29 | 28 | 1.750 | 0 |
+| 32 | 57 | 58 | 58 | 1.813 | +3.6% |
+| 64 | 116 | 117 | 116 | 1.813 | +3.6% |
+| 128 | 233 | 234 | 234 | 1.828 | +4.5% |
+
+- The matcher reaches the best possible frame code, or comes within one bit,
+  with fixed-precision arithmetic and no tables. A block code for `n = 128`
+  would need one codebook of `2^234` entries per previous level.
+- A stream of 232 000 bits in frames of 64 symbols, with the previous level
+  carried across frames, has no full swings; plain Gray-coded PAM-4 has
+  14 567.
+- GDDR6X's MTA appears to send 7 bits per 4 symbols (1.75 bits/symbol), the
+  best possible for `n = 4`. A code valid after any level fits only 6 bits
+  there; the MTA patents use the DBI line as extra signalling.
+- Long frames buy up to 4.5% more throughput, at the usual price: one wrong
+  symbol corrupts the rest of the frame, and the frame adds latency. The
+  checks above `k = 14` are sampled, not proven.
+
+### Energy shaping
+
+The demo can also bias the model toward cheap transitions. With a simple
+energy model, a transition `p → q` costs `(q − p)^2` (switching energy grows
+with the square of the voltage step; an optional static per-level term is off
+by default). Weighting the transitions by `2^(−μ E)` gives, for each `μ`, the
+Markov chain with the most bits per symbol for its mean energy. The baselines
+are block codes that send `k` bits in 4 symbols using, for each previous
+level, the `2^k` lowest-energy codewords:
+
+| code | bits/symbol | energy/bit |
+|---|---|---|
+| plain PAM-4, full swings allowed | 2.000 | 1.246 |
+| block 7b4s, low-energy codebooks | 1.750 | 0.721 |
+| block 6b4s, low-energy codebooks | 1.500 | 0.527 |
+| block 5b4s, low-energy codebooks | 1.250 | 0.408 |
+| p-adic, one stream, μ = 0.25 | 1.790 | 0.651 |
+| p-adic, one stream, μ = 0.5 | 1.681 | 0.516 |
+| p-adic, one stream, μ = 1 | 1.457 | 0.382 |
+| p-adic, fixed 128-symbol frames, μ = 0.25 | 1.500 | 0.767 |
+| p-adic, fixed 128-symbol frames, μ = 1 | 0.906 | 0.617 |
+
+- As one continuous stream, the shaped matcher reaches the theoretical
+  trade-off (e.g. 1.7896 bits/symbol vs. 1.7868 in theory at μ = 0.25) and
+  beats the low-energy block codes on both counts: more bits per symbol *and*
+  less energy per bit (1.79 vs. 1.75 bits/symbol at 0.651 vs. 0.721 per bit).
+  But the number of bits per frame then varies, so the input must be
+  buffered.
+- With a fixed number of bits per frame, which a link needs, it is *worse*
+  than the block codes. Every input must fit, so the rate is set by the most
+  probable frame (for example one that stays on a single level), not by the
+  average.
+- So energy shaping with this coder suits a buffered, variable-rate setting.
+  For fixed-rate links, low-energy block codes (possibly generated from the
+  same model) are the better choice.
+
+Here, unlike plain compression, the coder brings something a fixed base
+cannot: the Markov model handles a constraint whose number of choices changes
+from symbol to symbol. `P` itself does not matter (`P = 2` is used).
 
 ## Is P ≠ 2 worth it?
 

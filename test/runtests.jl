@@ -115,6 +115,37 @@ end
     @test_throws ArgumentError padic_decode_fixed(m, [0], -1)
 end
 
+@testset "models without EOM, per-step fixed-length models" begin
+    rng = Xoshiro(23)
+    m = PadicModel([5, 3, 2]; P = 3, N = 8, eom = false)
+    @test eom(m) == 0
+    @test_throws ArgumentError padic_encode(m, [1, 2])
+    @test_throws ArgumentError padic_decode(m, [0, 1])
+    for _ in 1:50
+        msg = rand(rng, 1:3, rand(rng, 0:100))
+        @test padic_decode_fixed(m, padic_encode_fixed(m, msg), length(msg)) == msg
+        bits = rand(rng, 0:2, rand(rng, 0:30))  # any digit string decodes
+        @test all(in(1:3), padic_decode_fixed(m, bits, 20))
+    end
+
+    # The model depends on the previous symbol (a Markov source).
+    rows = [[8, 1, 1], [1, 8, 1], [1, 1, 8], [3, 3, 3]]
+    for P in (2, 3, 4)
+        ms = [PadicModel(f .* 50; P = P, N = 12, eom = false) for f in rows]
+        model_at(t, prefix) = ms[t == 1 ? 4 : prefix[end]]
+        for _ in 1:20
+            msg = rand(rng, 1:3, rand(rng, 0:200))
+            bits = padic_encode_fixed(model_at, msg)
+            @test padic_decode_fixed(model_at, bits, length(msg)) == msg
+        end
+    end
+    s = PadicModel([4, 2, 1]; P = 2, N = 16)
+    msg = rand(rng, 1:3, 100)
+    @test padic_encode_fixed((t, p) -> s, msg) == padic_encode_fixed(s, msg)
+    bad(t, p) = PadicModel([1, 1]; P = 2, N = t == 1 ? 8 : 9)
+    @test_throws ArgumentError padic_encode_fixed(bad, [1, 2])
+end
+
 @testset "composite P and model checks" begin
     rng = Xoshiro(5)
     for P in (4, 6, 10, 12, 256), _ in 1:10
