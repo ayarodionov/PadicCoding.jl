@@ -85,11 +85,14 @@ rescale(x::I128, n::Int, P::Int, N::Int) =
 # ---------------------------------------------------------------------------
 
 """
-    PadicModel(freqs; P = 2, N)
+    PadicModel(freqs; P = 2, N, eom = true)
 
 Static model over the alphabet `1 .. length(freqs)` with the given positive
 symbol frequencies; a special EOM symbol (index `length(freqs) + 1`) with
-frequency 1 is appended.  `P >= 2` is the base of the output digits and `N`
+frequency 1 is appended.  With `eom = false` there is no EOM symbol; such a
+model works only with the fixed-length functions (`padic_encode_fixed`,
+`padic_decode_fixed`, `padic_fill`), and then any digit string decodes to
+real symbols.  `P >= 2` is the base of the output digits and `N`
 is the grid level: all interval edges are indexes of the grid G(P^N).  The
 paper takes `P` prime, but the coder only uses base-P digits, so any `P >= 2`
 works (see `demos/composite_p_test.jl`).  `P^N * total` must fit in `Int128`.
@@ -106,24 +109,30 @@ struct PadicModel
     R::I128           # P^N, number of grid intervals
     cum::Vector{Int}  # cumulative frequencies, cum[a] .. cum[a+1] for symbol a
     total::Int
+    has_eom::Bool     # last symbol of cum is the EOM symbol
 end
+PadicModel(P, N, R, cum, total) = PadicModel(P, N, R, cum, total, true)
 
-function PadicModel(freqs::AbstractVector{<:Integer}; P::Int = 2, N::Int)
+function PadicModel(freqs::AbstractVector{<:Integer}; P::Int = 2, N::Int,
+                    eom::Bool = true)
     P >= 2 || throw(ArgumentError("P must be at least 2"))
     isempty(freqs) && throw(ArgumentError("alphabet must not be empty"))
     all(>(0), freqs) || throw(ArgumentError("frequencies must be positive"))
-    cum = cumsum(vcat(0, Vector{Int}(freqs), 1))  # EOM gets weight 1
+    cum = cumsum(vcat(0, Vector{Int}(freqs), eom ? [1] : Int[]))  # EOM weight 1
     total = cum[end]
     big(P)^N * total < big(2)^126 ||
         throw(ArgumentError("P^N * total frequency does not fit in Int128"))
     R = I128(P)^N
     total <= R ÷ (I128(P) * P) + 1 ||
         throw(ArgumentError("grid level N too small for total frequency $total"))
-    return PadicModel(P, N, R, cum, total)
+    return PadicModel(P, N, R, cum, total, eom)
 end
 
-"Index of the End-Of-Message symbol of the model."
-eom(m::PadicModel) = length(m.cum) - 1
+"Index of the End-Of-Message symbol of the model (0 if it has none)."
+eom(m::PadicModel) = m.has_eom ? length(m.cum) - 1 : 0
+
+needeom(m::PadicModel) = m.has_eom || throw(ArgumentError(
+    "model has no EOM symbol; use padic_encode_fixed / padic_decode_fixed"))
 
 "`M.code(a, l, r)`: new subinterval for symbol `a` (r == 0 stands for P^N)."
 function mcode(m::PadicModel, a::Int, l::I128, r::I128)
@@ -240,6 +249,7 @@ whose interval straddles a level-1 grid point for too long -- use
 [`padic_encode`](@ref) for the robust variant.
 """
 function padic_encode_pr(m::PadicModel, msg::AbstractVector{<:Integer})
+    needeom(m)
     P, N = m.P, m.N
     out = Int[]
     l = r = zero(I128)
@@ -264,6 +274,7 @@ end
 Decoder matching [`padic_encode_pr`](@ref).
 """
 function padic_decode_pr(m::PadicModel, bits::Vector{Int})
+    needeom(m)
     P, N = m.P, m.N
     io = BitReader(bits)
     out = Int[]
@@ -383,6 +394,7 @@ Revised p-adic encoder with PR and AR rescaling.  `msg` contains symbols
 stream of P-bits (0 .. P-1); for P = 2 these are plain bits.
 """
 function padic_encode(m::PadicModel, msg::AbstractVector{<:Integer})
+    needeom(m)
     e = Encoder()
     for a in msg
         encode_step!(e, m, Int(a))
@@ -395,8 +407,16 @@ end
 
 Encoder for messages whose length is known to the decoder: the EOM symbol is
 not coded, which saves about `log_P(total)` digits per message.  Decode with
-[`padic_decode_fixed`](@ref) and the same length.  The model's EOM slot stays
-reserved, which costs only `log_P(total / (total - 1))` per symbol.
+[`padic_decode_fixed`](@ref) and the same length.  A model built with
+`eom = false` wastes nothing; otherwise its EOM slot stays reserved, which
+costs only `log_P(total / (total - 1))` per symbol.
+
+    padic_encode_fixed(model_at, msg) -> Vector{Int}
+
+Per-step models: symbol `t` is coded with `model_at(t, prefix)`, where `prefix`
+holds the symbols before it.  `model_at` is called once per symbol, in order,
+and all models must share `P` and `N`.  Decode with
+`padic_decode_fixed(model_at, bits, n)` and a fresh, identical `model_at`.
 """
 function padic_encode_fixed(m::PadicModel, msg::AbstractVector{<:Integer})
     e = Encoder()
@@ -433,17 +453,36 @@ function padic_fill(m::PadicModel, msg::AbstractVector{<:Integer}, L::Integer;
     return k, best
 end
 
+function padic_encode_fixed(model_at::Function, msg::AbstractVector{<:Integer})
+    e = Encoder()
+    m = nothing
+    for t in eachindex(msg)
+        mt = model_at(t, view(msg, firstindex(msg):t-1))
+        m === nothing || samegrid(m, mt)
+        m = mt
+        encode_step!(e, m, Int(msg[t]))
+    end
+    m === nothing && return Int[]
+    return append!(e.out, encode_tail(e, m; eom_symbol = false))
+end
+
+samegrid(m::PadicModel, mt::PadicModel) = (m.P, m.N) == (mt.P, mt.N) ||
+    throw(ArgumentError("all per-step models must share P and N"))
+
 # Decoder for both variants: n < 0 decodes until EOM, n >= 0 decodes n symbols.
-function decode_core(m::PadicModel, bits::Vector{Int}, n::Int)
-    P, N = m.P, m.N
+# model_at(t, out) gives the model for symbol t.
+function decode_core(model_at::Function, bits::Vector{Int}, n::Int)
     io = BitReader(bits)
     out = Int[]
     n == 0 && return out
+    m = model_at(1, out)
+    P, N = m.P, m.N
     l = r = zero(I128)
     sp = 0
     spn = 0
     g = getpath!(io, N, P)
     while true
+        length(out) > 0 && (mt = model_at(length(out) + 1, out); samegrid(m, mt); m = mt)
         l, r, a = mdecode(m, g, l, r)
         a == eom(m) && n < 0 && break
         push!(out, a)
@@ -492,17 +531,24 @@ end
 
 Decoder matching [`padic_encode`](@ref).
 """
-padic_decode(m::PadicModel, bits::Vector{Int}) = decode_core(m, bits, -1)
+padic_decode(m::PadicModel, bits::Vector{Int}) =
+    (needeom(m); decode_core((t, out) -> m, bits, -1))
 
 """
     padic_decode_fixed(m, bits, n) -> Vector{Int}
 
 Decoder matching [`padic_encode_fixed`](@ref) and [`padic_fill`](@ref):
-decodes exactly `n` symbols.
+decodes exactly `n` symbols.  With a function `model_at` in place of `m`,
+symbol `t` is decoded with `model_at(t, prefix)`.
 """
 function padic_decode_fixed(m::PadicModel, bits::Vector{Int}, n::Integer)
     n >= 0 || throw(ArgumentError("message length must be non-negative"))
-    return decode_core(m, bits, Int(n))
+    return decode_core((t, out) -> m, bits, Int(n))
+end
+
+function padic_decode_fixed(model_at::Function, bits::Vector{Int}, n::Integer)
+    n >= 0 || throw(ArgumentError("message length must be non-negative"))
+    return decode_core(model_at, bits, Int(n))
 end
 
 include("PadicCoding2.jl")
